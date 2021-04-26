@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hao: copied from https://github.com/ray-project/xgboost_ray/blob/master/format.sh
+# Hao: modified from https://github.com/ray-project/xgboost_ray/blob/master/format.sh
 
 # YAPF + Clang formatter (if installed). This script formats all changed files from the last mergebase.
 # You are encouraged to run this locally before pushing changes for review.
@@ -46,7 +46,7 @@ builtin cd "$ROOT" || exit 1
 
 # Add the upstream remote if it doesn't exist
 if ! git remote -v | grep -q upstream; then
-    git remote add 'upstream' 'https://github.com/ray-project/xgboost_ray.git'
+    git remote add 'upstream' 'https://github.com/ray-project/distml.git'
 fi
 
 FLAKE8_VERSION=$(flake8 --version | awk '{print $1}')
@@ -55,7 +55,7 @@ YAPF_VERSION=$(yapf --version | awk '{print $2}')
 # params: tool name, tool version, required version
 tool_version_check() {
     if [[ $2 != $3 ]]; then
-        echo "WARNING: Ray uses $1 $3, You currently are using $2. This might generate different results."
+        echo "WARNING: DistML uses $1 $3, You currently are using $2. This might generate different results."
     fi
 }
 
@@ -120,8 +120,8 @@ format_changed() {
 
 # Format all files, and print the diff to stdout for travis.
 format_all() {
-    yapf --diff "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" xgboost_ray
-    flake8 --inline-quotes '"' --no-avoid-escape --ignore=N,I,C408,E121,E123,E126,E211,E225,E226,E227,E24,E704,E999,W503,W504,W605 xgboost_ray
+    yapf --diff "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" distml
+    flake8 --inline-quotes '"' --no-avoid-escape --ignore=N,I,C408,E121,E123,E126,E211,E225,E226,E227,E24,E704,E999,W503,W504,W605 distml
 }
 
 # This flag formats individual files. --files *must* be the first command line
