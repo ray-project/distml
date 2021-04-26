@@ -18,11 +18,6 @@ DistML currently supports:
     * JAX
     
 # Installation
-
-### Install from wheel
-```python
-pip install distml
-```
 ### Install from source for dev
 ```python
 pip install -e .
