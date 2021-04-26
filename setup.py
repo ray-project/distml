@@ -1,9 +1,6 @@
 import os
 from setuptools import setup, find_packages
 
-# from distutils.command import build_py
-# from distutils.command import clean
-
 
 setup(
     name="distml",
