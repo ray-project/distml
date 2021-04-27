@@ -17,6 +17,8 @@ setup(
     ],
     install_requires=[
         "ray",
+        "pandas",
+        "tabulate",
     ],
     extras_require={
         'dev': [

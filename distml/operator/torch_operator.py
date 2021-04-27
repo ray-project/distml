@@ -226,7 +226,7 @@ class TorchTrainingOperator(TrainingOperator):
         return torch_tensor
 
     @staticmethod
-    def _set_gradients(self, model, grads):
+    def _set_gradients(model, grads):
         """Set the model gradients as grads."""
         for name, p in model.named_parameters():
             p.grad = grads[name]

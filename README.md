@@ -16,8 +16,12 @@ DistML currently supports:
 * DL Frameworks:
     * PyTorch
     * JAX
-    
+
 # Installation
+
+### Install Dependencies
+Depending on your CUDA version, install cupy following https://docs.cupy.dev/en/stable/install.html.
+
 ### Install from source for dev
 ```python
 pip install -e .
