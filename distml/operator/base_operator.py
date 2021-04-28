@@ -19,16 +19,12 @@ class TrainingOperator(metaclass=ABCMeta):
     Args:
         operator_config (dict): operator config specified by users.
     """
+
     def __init__(self, *args, operator_config=None, **kwargs):
         self._operator_config = operator_config
 
     @abstractmethod
-    def register(self,
-                 *,
-                 model,
-                 optimizer,
-                 criterion,
-                 **kwargs):
+    def register(self, *, model, optimizer, criterion, **kwargs):
         """Register the model, optimizer, and criterion with the training operator.
 
         The function is instantiated in the framework-specific subclass. It
@@ -116,28 +112,32 @@ class TrainingOperator(metaclass=ABCMeta):
 
     def _get_train_loader(self):
         if not self._train_loader:
-            raise RuntimeError("The operator does not have any registered train loader. "
-                               "Please register the train loader via "
-                               "`self.register_data()` inside the `self.setup()` function.")
+            raise RuntimeError(
+                "The operator does not have any registered train loader. "
+                "Please register the train loader via "
+                "`self.register_data()` inside the `self.setup()` function.")
         return self._train_loader
 
     def _get_validation_loader(self):
         if not self._validation_loader:
-            raise RuntimeError("The operator does not have any registered validation loader. "
-                               "Please register the validation loader via "
-                               "`self.register_data()` inside the `self.setup()` function.")
+            raise RuntimeError(
+                "The operator does not have any registered validation loader. "
+                "Please register the validation loader via "
+                "`self.register_data()` inside the `self.setup()` function.")
         return self._validation_loader
 
     def _get_optimizer(self):
         if not self._optimizer:
-            raise RuntimeError("The operator does not have any registered optimizer. "
-                               "Please register the optimizer via "
-                               "`self.register()` inside the `self.setup()` function.")
+            raise RuntimeError(
+                "The operator does not have any registered optimizer. "
+                "Please register the optimizer via "
+                "`self.register()` inside the `self.setup()` function.")
         return self._optimizer
 
     def _get_criterion(self):
         if not self._optimizer:
-            raise RuntimeError("The operator does not have any registered criterion. "
-                               "Please register the criterion via "
-                               "`self.register()` inside the `self.setup()` function.")
+            raise RuntimeError(
+                "The operator does not have any registered criterion. "
+                "Please register the criterion via "
+                "`self.register()` inside the `self.setup()` function.")
         return self._criterion

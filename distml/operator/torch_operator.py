@@ -18,11 +18,10 @@ class TorchTrainingOperator(TrainingOperator):
     Args:
         operator_config (dict): operator config specified by users.
     """
-    def __init__(self,
-                 *,
-                 operator_config=None,
-                 **kwargs):
-        super(TorchTrainingOperator, self).__init__(operator_config=operator_config)
+
+    def __init__(self, *, operator_config=None, **kwargs):
+        super(TorchTrainingOperator,
+              self).__init__(operator_config=operator_config)
         # Should be set by users in the `register` function.
         self.model = None
         self.optimizer = None
@@ -41,7 +40,8 @@ class TorchTrainingOperator(TrainingOperator):
         #   and support CPU training (with GLOO backend).
         self._use_gpu = torch.cuda.is_available()
         if not self._use_gpu:
-            raise RuntimeError("ray.util.distml now only supports GPU training.")
+            raise RuntimeError(
+                "ray.util.distml now only supports GPU training.")
         self.setup(operator_config)
 
     def register(self,
@@ -69,18 +69,16 @@ class TorchTrainingOperator(TrainingOperator):
         self._optimizer = optimizer
         if criterion:
             if not isinstance(criterion, _Loss):
-                raise RuntimeError("`criterion` must be torch.nn.module._Loss. "
-                                   "Got: {}".format(self._criterion))
+                raise RuntimeError(
+                    "`criterion` must be torch.nn.module._Loss. "
+                    "Got: {}".format(self._criterion))
             self._criterion = criterion
             if self._use_gpu:
                 self._criterion.cuda()
         # TODO(Hao): support lr schedulers
         return self._model, self._optimizer, self._criterion
 
-    def register_data(self,
-                      *,
-                      train_loader=None,
-                      validation_loader=None):
+    def register_data(self, *, train_loader=None, validation_loader=None):
         self._train_loader = train_loader
         self._validation_loader = validation_loader
         # TODO(Hao): convert each data loader to be distributed
@@ -102,12 +100,14 @@ class TorchTrainingOperator(TrainingOperator):
                                "this function for deriving gradient updates.")
         model = self.model
         if not self.optimizer:
-            raise RuntimeError("Please set self.optimizer at setup or override "
-                               "this function for deriving gradient updates.")
+            raise RuntimeError(
+                "Please set self.optimizer at setup or override "
+                "this function for deriving gradient updates.")
         optimizer = self.optimizer
         if not self.criterion:
-            raise RuntimeError("Please set self.criterion at setup or override "
-                               "this function for deriving gradient updates.")
+            raise RuntimeError(
+                "Please set self.criterion at setup or override "
+                "this function for deriving gradient updates.")
         criterion = self.criterion
         *features, target = batch
         model.train()
@@ -146,8 +146,9 @@ class TorchTrainingOperator(TrainingOperator):
                                "this function for validation.")
         model = self.model
         if not self.criterion:
-            raise RuntimeError("Please set self.criterion at setup or override "
-                               "this function for validation.")
+            raise RuntimeError(
+                "Please set self.criterion at setup or override "
+                "this function for validation.")
         criterion = self.criterion
         *features, target = batch
         model.eval()
@@ -173,17 +174,16 @@ class TorchTrainingOperator(TrainingOperator):
             "custom": self.get_custom_states()
         }
         if self._lr_scheduler:
-            states.update({
-                "lr_scheduler": self._lr_scheduler.state_dict()}
-            )
+            states.update({"lr_scheduler": self._lr_scheduler.state_dict()})
         return states
 
     def load_states(self, states=None, checkpoint=None):
         """Load the states into the operator."""
         if not states and not checkpoint:
-            raise RuntimeError("One of `states` and `checkpoint` should be provided. "
-                               "Got states: {}, checkpoint: {}.".format(states, checkpoint))
-        if not states and checkpoint :
+            raise RuntimeError(
+                "One of `states` and `checkpoint` should be provided. "
+                "Got states: {}, checkpoint: {}.".format(states, checkpoint))
+        if not states and checkpoint:
             states = self._load_from_checkpoint(checkpoint)
         self.model.load_state_dict(states["model"])
         self.optimizer.load_state_dict(states["optimizer"])

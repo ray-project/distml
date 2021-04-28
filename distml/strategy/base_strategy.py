@@ -6,6 +6,7 @@ import ray
 
 logger = logging.getLogger(__name__)
 
+
 class BaseStrategy(metaclass=ABCMeta):
     def __init__(self,
                  *,
@@ -19,8 +20,9 @@ class BaseStrategy(metaclass=ABCMeta):
         self.training_operator_cls = training_operator_cls
         self.initialization_hook = initialization_hook
         if world_size < 2:
-            raise RuntimeError("ray.util.distml does not support single-process training "
-                               "at this moment.")
+            raise RuntimeError(
+                "ray.util.distml does not support single-process training "
+                "at this moment.")
         self.world_size = world_size
         self.num_cpus_per_worker = num_cpus_per_worker
         self.num_gpus_per_worker = num_gpus_per_worker
