@@ -17,7 +17,7 @@ from jax_util import datasets
 from jax_util.resnet import ResNet18, ResNet50, ResNet101
 import os
 
-from ray.util.distml.util import ThroughoutCollection, func_timer
+from distml.strategy.util import ThroughputCollection, func_timer
 
 from tqdm import tqdm
 
@@ -93,7 +93,7 @@ class Worker:
 
         self.update = update # jax.jit(update)
 
-        self.collector = ThroughoutCollection(batch_size=self.batch_size, num_workers=1,
+        self.collector = ThroughputCollection(batch_size=self.batch_size,
                                               job_name=f"mnist_benchmark_{model_name}")
 
     def derive_updates(self, batch):
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     #     default=2,
     #     help="Sets number of workers for training.")
     parser.add_argument(
-        "--num-epochs", type=int, default=20, help="Number of epochs to train.")
+        "--num-epochs", type=int, default=5, help="Number of epochs to train.")
     parser.add_argument(
         "--use-gpu",
         action="store_true",

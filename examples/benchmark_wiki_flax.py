@@ -22,7 +22,7 @@ from flax_util.datasets import make_wiki_train_loader, tf2numpy
 from flax_util.models import Bert
 
 
-from ray.util.distml.util import ThroughoutCollection, func_timer
+from distml.strategy.util import ThroughputCollection, func_timer
 
 from jax_util.datasets import _one_hot, _one_hot_jit
 from transformers.models.bert.configuration_bert import BertConfig
@@ -45,7 +45,7 @@ if __name__ == "__main__":
         default=4,
         help="Sets number of workers for training.")
     parser.add_argument(
-        "--num-epochs", type=int, default=20, help="Number of epochs to train.")
+        "--num-epochs", type=int, default=1, help="Number of epochs to train.")
     parser.add_argument(
         "--use-gpu",
         action="store_true",
@@ -74,7 +74,7 @@ if __name__ == "__main__":
     lr = 0.01
     n_ctx = 128  
 
-    collector = ThroughoutCollection(batch_size=batch_size, num_workers=1,
+    collector = ThroughputCollection(batch_size=batch_size,
                                      job_name=f"flax_wiki_benchmark_bert_base")
 
     key = random.PRNGKey(0)
@@ -155,7 +155,7 @@ if __name__ == "__main__":
                 loss_val, grad = value_and_grad(loss_func)(optimizer.target, batch)
                 optimizer = optimizer.apply_gradient(grad) # Return the updated optimizer with parameters.
                 # print("time spending", time.time() - start_time)
-            if idx % 10 == 0:
-                print('Loss step {}: '.format(idx), loss_val.item())
+            # if idx % 10 == 0:
+            #     print('Loss step {}: '.format(idx), loss_val.item())
 
     print("success!")
