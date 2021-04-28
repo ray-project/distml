@@ -108,7 +108,7 @@ class AllReduceStrategy(BaseStrategy):
         replica_params = dict(
             training_operator_cls=self.training_operator_cls,
             operator_config=operator_config)
-        # (2) params for setting up collective group and strategy-related prep-ups
+        # (2) params for setting up collective group and strategy prep-ups.
         dist_params = dict(
             strategy="allreduce",
             backend="nccl",
