@@ -97,8 +97,9 @@ class AllReduceStrategy(BaseStrategy):
     def _start_workers(self):
         """Create distributed workers on the Ray cluster for distributed training.
 
-        Specifically, this function will spawn the necessary actor processes depending
-        on the strategy used, and arrange and pass their required arguments.
+        Specifically, this function will spawn the necessary actor processes
+        depending on the strategy used, and arrange and pass their required
+        arguments.
         """
         # TODO (Hao): infer the per-replica batch size here...
         # so here we get multiple sets of params that will be passed around:
@@ -107,7 +108,7 @@ class AllReduceStrategy(BaseStrategy):
         replica_params = dict(
             training_operator_cls=self.training_operator_cls,
             operator_config=operator_config)
-        # (2) params for setting up collective group and the strategy-related prep-ups
+        # (2) params for setting up collective group and strategy-related prep-ups
         dist_params = dict(
             strategy="allreduce",
             backend="nccl",
@@ -201,8 +202,6 @@ class Replica:
         except StopIteration and NameError:
             self.make_iterator()
             batch = next(self.train_iterator)
-
-        # loss_val should be in cpu, this convertion should be done in operator.
         loss_val, updates = self.derive_updates(batch)
         assert isinstance(updates, dict)
 
@@ -216,11 +215,10 @@ class Replica:
         return metrics
 
     def derive_updates(self, batch):
-        # TODO (Hao): handling data loader next.
         return self.training_operator.derive_updates(batch)
 
     def apply_updates(self, updates):
-        # TODO(Hao): this is conflicting with Runhui's code though on averaging grads
+        # TODO(Hao): conflicting with Runhui's code on averaging grads
         self.training_operator.apply_updates(updates)
 
     def updates_transform(self, updates):
@@ -398,7 +396,7 @@ class DataParallelGroup:
         return ray.get([ret])[0]
 
     def apply_all_replicas(self, fn):
-        """Apply a function fn in all replica processes and wait until their completion."""
+        """Apply fn in all replica processes and wait until completion."""
         return ray.get(self._apply_all_replicas(fn))
 
     def _apply_all_replicas(self, fn):

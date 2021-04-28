@@ -26,7 +26,7 @@ class BaseStrategy(metaclass=ABCMeta):
         self.world_size = world_size
         self.num_cpus_per_worker = num_cpus_per_worker
         self.num_gpus_per_worker = num_gpus_per_worker
-        self._operator_config = {} if  not operator_config \
+        self._operator_config = {} if not operator_config \
             else operator_config
         if not ray.is_initialized() and self.world_size > 1:
             logger.info("Automatically initializing single-node Ray. To use "

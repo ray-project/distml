@@ -83,9 +83,8 @@ class CifarTrainingOperator(TorchTrainingOperator):
         # # self.model, self.optimizer, self.criterion, self.scheduler = \
         #     # self.register(models=model, optimizers=optimizer,
         #                   criterion=criterion, schedulers=scheduler)
-        self.model, self.optimizer, self.criterion = \
-            self.register(model=model, optimizer=optimizer,
-                criterion=criterion)
+        self.model, self.optimizer, self.criterion = self.register(
+            model=model, optimizer=optimizer, criterion=criterion)
         self.register_data(
             train_loader=train_loader, validation_loader=validation_loader)
 
