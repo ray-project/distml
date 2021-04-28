@@ -51,8 +51,8 @@ class TorchTrainingOperator(TrainingOperator):
                  criterion,
                  lr_scheduler=None,
                  **kwargs):
-        # TODO(Hao): support custom training loop by allowing multiple model, optimizer,
-        #            e.g. for GAN training
+        # TODO(Hao): support custom training loop by allowing multiple model,
+        # optimizer, e.g. for GAN training
         if not isinstance(model, torch.nn.Module):
             raise RuntimeError("`model` must be torch.nn.Modules. "
                                "Got: {}".format(model))
@@ -63,8 +63,8 @@ class TorchTrainingOperator(TrainingOperator):
             raise RuntimeError("`optimizer` must be torch.optim.Optimizer. "
                                "Got: {}".format(optimizer))
 
-        # Note(Hao): this is problematic -- model and criterion are moved to gpu
-        # but optimizer is constructed before the movement.
+        # Note(Hao): this is problematic -- model and criterion are moved
+        # to gpu but optimizer is constructed before the movement.
         # See: https://github.com/ray-project/ray/issues/15258
         self._optimizer = optimizer
         if criterion:
@@ -232,6 +232,7 @@ class TorchTrainingOperator(TrainingOperator):
             p.grad = grads[name]
             # if grads[name] is not None:
             #     if p.grad is not None:
-            #         p.grad = torch.from_numpy(gradients[name]).to(p.grad.device)
+            #         p.grad = torch.from_numpy(gradients[name]).
+            #         to(p.grad.device)
             #     else:
             #         p.grad = torch.from_numpy(gradients[name])

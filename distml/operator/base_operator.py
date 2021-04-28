@@ -41,8 +41,9 @@ class TrainingOperator(metaclass=ABCMeta):
     def setup(self, operator_config):
         """Method to be override by users.
 
-        In this method, the user should register the model, optimizer, criterion,
-        and data loaders to the operator class via the `register()` method.
+        In this method, the user should register the model, optimizer,
+        criterion, and data loaders to the operator class via the
+        `register()` method.
         """
         raise NotImplementedError()
 

@@ -15,7 +15,8 @@ class AllReduceStrategy(BaseStrategy):
     """Strategy that trains a model via collective AllReduce.
 
     Args:
-        training_operator_cls (TrainingOperator): Custom training operator class.
+        training_operator_cls (TrainingOperator):
+            Custom training operator class.
         operator_config (dict): operator config specified by users.
         initialization_hook (function): A function to call on all training
             workers when they are first initialized. This could be useful to
@@ -55,8 +56,8 @@ class AllReduceStrategy(BaseStrategy):
         """Run the training on parallel workers.
 
         Args:
-            num_steps (int): number of steps to train. If none, the function will
-                simply train for one epoch.
+            num_steps (int): number of steps to train. If none, the
+                function will simply train for one epoch.
 
         Returns:
             None
@@ -77,8 +78,9 @@ class AllReduceStrategy(BaseStrategy):
         """Evaluates the model on the validation data.
 
         Args:
-            num_steps (int): number of batches to evaluate. If None, the function
-                will simply validate across the entire validation dataset.
+            num_steps (int): number of batches to evaluate. If None, the
+                function will simply validate across the entire validation
+                dataset.
         """
         steps = num_steps if num_steps \
             else self.data_parallel_group.get_data_loader_len(training=False)
@@ -89,7 +91,8 @@ class AllReduceStrategy(BaseStrategy):
         self._collector.update(
             "validate", val_acc=batch_metrics[0]["val_loss"])
         self._collector.save("validate")
-        return batch_metrics  # validate result should be the same in all workers
+        # TODO: validate result should be the same in all workers
+        return batch_metrics
 
     def _start_workers(self):
         """Create distributed workers on the Ray cluster for distributed training.
@@ -98,7 +101,6 @@ class AllReduceStrategy(BaseStrategy):
         on the strategy used, and arrange and pass their required arguments.
         """
         # TODO (Hao): infer the per-replica batch size here...
-
         # so here we get multiple sets of params that will be passed around:
         # (1) Those for setting up replica
         operator_config = self._operator_config.copy()
@@ -335,9 +337,6 @@ class DataParallelGroup:
 
     def make_iterator(self, training=True):
         ray.get(self._make_iterator(training=training))
-
-    def start_iteration(self):
-        rets = [replica.start_iteration.remote() for replica in self.replicas]
 
     def get_data_loader_len(self, training=True):
         """Return the number of batches in the data loader."""

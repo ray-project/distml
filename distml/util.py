@@ -10,7 +10,7 @@ except ModuleNotFoundError:
     raise ModuleNotFoundError("Please install cupy following: "
                               "https://docs.cupy.dev/en/stable/install.html.")
 
-from ray.util.sgd.utils import TimerStat, TimerCollection, AverageMeterCollection
+from ray.util.sgd.utils import TimerCollection
 
 
 def override(interface_class):
@@ -42,13 +42,6 @@ def zeros(shape, cpu=True):
         return np.zeros(shape)
     else:
         return cp.zeros(shape)
-
-
-def zeros_like(x, cpu=True):
-    if cpu:
-        return np.zeros_like(x)
-    else:
-        return cp.zeros_like(x)
 
 
 def numel(v):
@@ -113,8 +106,8 @@ class ThroughputCollection(TimerCollection):
     def save(self, key):
         self.report(key)
         df = pd.DataFrame.from_dict(
-            self.result_collection[key], orient='columns')
-        df.to_csv(f'{self.job_name}_{key}.csv', index=None)
+            self.result_collection[key], orient="columns")
+        df.to_csv(f"{self.job_name}_{key}.csv", index=None)
 
 
 def func_timer(function):
@@ -125,7 +118,7 @@ def func_timer(function):
         t0 = time.time()
         result = function(*args, **kwargs)
         t1 = time.time()
-        print('[Function: {name} finished, spent time: {time:.5f}s]'.format(
+        print("[Function: {name} finished, spent time: {time:.5f}s]".format(
             name=function.__name__, time=t1 - t0))
         return result
 
