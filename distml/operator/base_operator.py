@@ -6,15 +6,16 @@ from abc import abstractmethod
 class TrainingOperator(metaclass=ABCMeta):
     """Abstract class to define the training loop of a model.
 
-    This class should be subclassed by the framework-specific operator implementations.
-    For training, this class exposes two interfaces:
+    This class should be subclassed by the framework-specific
+    operator implementations. For training, this class exposes
+    two interfaces:
         - `derive_updates()`
         - `apply_updates()`
     in order for Ray collective backend to take over.
 
-    For validation, this class exposes a single `validate_batch()` interface.
-    The specific training and validation logic related with frameworks (JAX, PyTorch) is
-    implemented in its subclasses
+    For validation, this class exposes a single `validate_batch()`
+    interface. The specific training and validation logic related
+    with frameworks (JAX, PyTorch) is implemented in its subclasses
 
     Args:
         operator_config (dict): operator config specified by users.
