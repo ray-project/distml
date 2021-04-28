@@ -53,11 +53,11 @@ class JAXTrainingOperator(TrainingOperator):
             opt_init, opt_update, get_params = optimizers.adam(lr)
             opt_state = opt_init(init_params)
 
-            self.register(model=(opt_state, get_params, predict_fun),
-                          optimizer=opt_update,
-                          criterion=lambda logits, \
-                              targets:-jnp.sum(logits * targets))
+            criterion = lambda logits, targets:-jnp.sum(logits * targets)
 
+            self.register(model=(opt_state, init_fun, predict_fun),
+                          optimizer=(opt_init, opt_update, get_params),
+                          criterion=criterion)
         """
         pass
 
