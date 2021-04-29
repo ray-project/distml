@@ -3,16 +3,16 @@ import ray.util.collective as col
 
 import numpy as np
 
-import distml.strategy.util as util
-from distml.strategy.base_trainer import BaseTrainer
-from .util import ThroughputCollection
+import distml.util as util
+from distml.strategy.base_strategy import BaseStrategy
+from distml.util import ThroughputCollection
 
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class ParameterServerStrategy(BaseTrainer):
+class ParameterServerStrategy(BaseStrategy):
     """Strategy that trains a model via collective AllReduce.
 
     Args:
@@ -240,7 +240,7 @@ class ParameterServerStrategy(BaseTrainer):
         return metrics
 
 
-class PS(object):  
+class PS(object):
     def __init__(self, training_operator_cls, operator_config):
         self.training_operator_cls = training_operator_cls
         self.operator_config = operator_config
