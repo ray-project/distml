@@ -2,6 +2,18 @@ import ray
 from queue import Queue
 
 
+class TaskGraph
+
+class Task:
+    def __init__(self, *, compute_fn, batch):
+        self._compute_fn = compute_fn
+        self._batch = batch
+
+    def compute(self):
+        output_batch = self._compute_fn(self._batch)
+        return output_batch
+
+
 class PipeWorker:
     def __init(self):
         self._task_queue = Queue()
@@ -61,7 +73,7 @@ class Pipeline:
         self._create_workers(self._num_workers)
 
     def _create_workers(self, num_workers):
-        remote_worker = ray.remote(num_cpus=1, num_gpus=1)(PipeWorker)
+        remote_worker = ray.remote(num_cpus=1, num_gpus={192:168:0.1:gpu:0, gpu:1, gpu:2})(PipeWorker)
         self.pipe_workers = [remote_worker.remote()
                              for _ in range(num_workers)]
 
@@ -92,9 +104,22 @@ class Pipeline:
 def GpipeSchedule(b, c):
     """Copied from https://github.com/facebookresearch/fairscale/blob/master/fairscale/nn/pipe/pipeline.py
 
+    # k: clock number
+    #
+    # k (i,j) (i,j) (i,j)
+    # - ----- ----- -----
+    # 0 (0,0)
+    # 1 (1,0) (0,1)
+    # 2 (2,0) (1,1) (0,2)
+    # 3       (2,1) (1,2)
+    # 4             (2,2)
+
+
     Args:
         b: # micro batches
         c: # cells
     """
     for k in range(b + c - 1):
         return [(k - j, j) for j in range(max(1 + k - b, 0), min(1 + k, c))]
+
+    return TaskGraph(), schedule
