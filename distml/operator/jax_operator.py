@@ -8,7 +8,7 @@ from jax.tree_util import tree_flatten, tree_unflatten, tree_structure
 from jax._src.util import unzip2
 from jax.experimental.optimizers import OptimizerState
 
-from .base_operator import TrainingOperator
+from distml.operator.base_operator import TrainingOperator
 
 
 class JAXTrainingOperator(TrainingOperator):
@@ -59,22 +59,17 @@ class JAXTrainingOperator(TrainingOperator):
                           optimizer=(opt_init, opt_update, get_params),
                           criterion=criterion)
         """
-        pass
+        raise NotImplementedError("Please override this function to register "
+                                  "your model, optimizer, and criterion.")
 
     def register(self,
                  *,
                  model,
                  optimizer,
                  criterion,
-                 lr_schedulers=None,
                  jit_mode=False):
         """Register a few critical information about the model to operator."""
         self.criterion = criterion
-        if lr_schedulers:
-            self.lr_schedulers = lr_schedulers
-            print("WARNING: jax not support learning rate scheduler."
-                  "This will not work.")
-
         self._register_model(model)
         self._register_optimizer(optimizer)
 
