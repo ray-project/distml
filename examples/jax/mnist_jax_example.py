@@ -53,20 +53,24 @@ class MnistTrainingOperator(JAXTrainingOperator):
         with FileLock(".ray.lock"):
             train_images, train_labels, test_images, test_labels = mnist()
 
-        train_images = train_images.reshape(train_images.shape[0], 1, 28,
-                                            28).transpose(2, 3, 1, 0)
-        test_images = test_images.reshape(test_images.shape[0], 1, 28,
-                                          28).transpose(2, 3, 1, 0)
+        train_images = train_images.reshape(
+            train_images.shape[0], 1, 28, 28).transpose(2, 3, 1, 0)
+
+        test_images = test_images.reshape(
+            test_images.shape[0], 1, 28, 28).transpose(2, 3, 1, 0)
 
         train_loader = Dataloader(
             train_images, train_labels, batch_size=batch_size, shuffle=True)
         test_loader = Dataloader(
             test_images, test_labels, batch_size=batch_size)
 
+        def criterion(logits, targets):
+            return -jnp.sum(logits * targets)
+
         self.register(
             model=[opt_state, init_fun, predict_fun],
             optimizer=[opt_init, opt_update, get_params],
-            criterion=lambda logits, targets: -jnp.sum(logits * targets))
+            criterion=criterion)
 
         self.register_data(
             train_loader=train_loader, validation_loader=test_loader)
