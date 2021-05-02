@@ -352,34 +352,40 @@ class JAXTrainingOperator(TrainingOperator):
         self.tree = tree_structure(params)
         self.opt_state = self.opt_init(params)
 
-    def ones(self, shape, cpu=True):
+    @staticmethod
+    def ones(shape, cpu=True):
         if cpu:
             return np.ones(shape)
         else:
             return jnp.ones(shape)
 
-    def zeros(self, shape, cpu=True):
+    @staticmethod
+    def zeros(shape, cpu=True):
         if cpu:
             return np.zeros(shape)
         else:
             return jnp.zeros(shape)
 
-    def ones_like(self, x, cpu=True):
+    @staticmethod
+    def ones_like(x, cpu=True):
         if cpu:
             return np.ones_like(x)
         else:
             return jnp.ones_like(x)
 
-    def zeros_like(self, x, cpu=True):
+    @staticmethod
+    def zeros_like(x, cpu=True):
         if cpu:
             return np.zeros_like(x)
         else:
             return jnp.zeros_like(x)
 
-    def numel(self, v):
+    @staticmethod
+    def numel(v):
         return np.size(v)
 
-    def asarray(self, v):
+    @staticmethod
+    def asarray(v):
         return jnp.asarray(v)
 
     def clean_redundancy(self):
