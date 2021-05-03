@@ -147,9 +147,12 @@ if __name__ == "__main__":
         loss = (loss1 + loss2)/2
         return loss
 
+    import pickle       
     for i in range(args.num_epochs):
         for idx, batch in enumerate(train_loader):
             batch = tf2numpy(batch)
+            with open("sample.pkl", "wb") as f:
+                pickle.dump(batch, f)
             with collector.record("train_batch"):
                 # start_time = time.time()
                 loss_val, grad = value_and_grad(loss_func)(optimizer.target, batch)
