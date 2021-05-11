@@ -12,7 +12,7 @@ from torchvision.datasets import CIFAR10
 from resnet import ResNet18
 from distml.util import override
 from distml.strategy.allreduce_strategy import AllReduceStrategy
-from distml.operator import TorchTrainingOperator
+from distml.operator.torch_operator import TorchTrainingOperator
 
 
 def initialization_hook():
