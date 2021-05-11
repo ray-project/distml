@@ -124,10 +124,10 @@ def cifa100_raw():
             raise RuntimeError("Error: unrecognized mode",
                                " Got {}".format(mode))
 
-        with open(filename, 'rb') as f:
-            datadict = pickle.load(f, encoding='bytes')
-            X = datadict[b'data']
-            Y = datadict[b'fine_labels']
+        with open(filename, "rb") as f:
+            datadict = pickle.load(f, encoding="bytes")
+            X = datadict[b"data"]
+            Y = datadict[b"fine_labels"]
             if mode == "train":
                 X = X.reshape(50000, 3, 32, 32)
             else:
@@ -191,10 +191,10 @@ def cifa10_raw():
         datas = []
         labels = []
         for filename in filenames:
-            with open(filename, 'rb') as f:
-                datadict = pickle.load(f, encoding='bytes')
-                X = datadict[b'data']
-                Y = datadict[b'labels']
+            with open(filename, "rb") as f:
+                datadict = pickle.load(f, encoding="bytes")
+                X = datadict[b"data"]
+                Y = datadict[b"labels"]
                 X = X.reshape(10000, 3, 32, 32)
                 datas.append(X)
                 labels.append(Y)
@@ -242,10 +242,12 @@ def cifa10(permute_train=False):
 
 class Dataloader:
     def __init__(self, data, target, batch_size=128, shuffle=False):
-        '''
-        data: shape(width, height, channel, num)
-        target: shape(num, num_classes)
-        '''
+        """Init the data loader.
+
+        Args:
+            data: shape(width, height, channel, num)
+            target: shape(num, num_classes)
+        """
         self.data = data
         self.target = target
         self.batch_size = batch_size

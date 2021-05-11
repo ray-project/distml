@@ -35,7 +35,7 @@ def ConvBlock(kernel_size, filters, strides=(2, 2)):
     filters1, filters2, filters3 = filters
     Main = stax.serial(
         Conv(filters1, (1, 1), strides), BatchNorm(), Relu,
-        Conv(filters2, (ks, ks), padding='SAME'), BatchNorm(), Relu,
+        Conv(filters2, (ks, ks), padding="SAME"), BatchNorm(), Relu,
         Conv(filters3, (1, 1)), BatchNorm())
     Shortcut = stax.serial(Conv(filters3, (1, 1), strides), BatchNorm())
     return stax.serial(
@@ -50,7 +50,7 @@ def IdentityBlock(kernel_size, filters):
         # the number of output channels depends on the number of input channels
         return stax.serial(
             Conv(filters1, (1, 1)), BatchNorm(), Relu,
-            Conv(filters2, (ks, ks), padding='SAME'), BatchNorm(), Relu,
+            Conv(filters2, (ks, ks), padding="SAME"), BatchNorm(), Relu,
             Conv(input_shape[3], (1, 1)), BatchNorm())
 
     Main = stax.shape_dependent(make_main)
@@ -62,8 +62,8 @@ def BasicBlock(kernel_size, filters, strides=(1, 1)):
     ks = kernel_size
     filters1, filters2 = filters
     Main = stax.serial(
-        Conv(filters1, (ks, ks), strides, padding='SAME'), BatchNorm(), Relu,
-        Conv(filters2, (ks, ks), strides, padding='SAME'), BatchNorm())
+        Conv(filters1, (ks, ks), strides, padding="SAME"), BatchNorm(), Relu,
+        Conv(filters2, (ks, ks), strides, padding="SAME"), BatchNorm())
 
     Shortcut = stax.serial(Conv(filters2, (1, 1), strides), BatchNorm())
     return stax.serial(
@@ -74,8 +74,8 @@ def BasicBlock_withoutBN(kernel_size, filters, strides=(1, 1)):
     ks = kernel_size
     filters1, filters2 = filters
     Main = stax.serial(
-        Conv(filters1, (ks, ks), strides, padding='SAME'), Relu,
-        Conv(filters2, (ks, ks), strides, padding='SAME'))
+        Conv(filters1, (ks, ks), strides, padding="SAME"), Relu,
+        Conv(filters2, (ks, ks), strides, padding="SAME"))
 
     Shortcut = stax.serial(Conv(filters2, (1, 1), strides))
     return stax.serial(
@@ -90,7 +90,7 @@ def IdentityBlock_withoutBN(kernel_size, filters):
         # the number of output channels depends on the number of input channels
         return stax.serial(
             Conv(filters1, (1, 1)), Relu,
-            Conv(filters2, (ks, ks), padding='SAME'), Relu,
+            Conv(filters2, (ks, ks), padding="SAME"), Relu,
             Conv(input_shape[3], (1, 1)))
 
     Main = stax.shape_dependent(make_main)
@@ -103,7 +103,7 @@ def IdentityBlock_withoutBN(kernel_size, filters):
 
 def ResNet101(num_classes):
     return stax.serial(
-        GeneralConv(('HWCN', 'OIHW', 'NHWC'), 64, (7, 7), (2, 2), 'SAME'),
+        GeneralConv(("HWCN", "OIHW", "NHWC"), 64, (7, 7), (2, 2), "SAME"),
         BatchNorm(), Relu, MaxPool((3, 3), strides=(2, 2)),
         ConvBlock(3, [64, 64, 256], strides=(1,
                                              1)), IdentityBlock(3, [64, 64]),
@@ -128,7 +128,7 @@ def ResNet101(num_classes):
 
 def ResNet50(num_classes):
     return stax.serial(
-        GeneralConv(('HWCN', 'OIHW', 'NHWC'), 64, (7, 7), (2, 2), 'SAME'),
+        GeneralConv(("HWCN", "OIHW", "NHWC"), 64, (7, 7), (2, 2), "SAME"),
         BatchNorm(), Relu, MaxPool((3, 3), strides=(2, 2)),
         ConvBlock(3, [64, 64, 256], strides=(1, 1)), IdentityBlock(
             3, [64, 64]), IdentityBlock(3, [64, 64]),
@@ -144,7 +144,7 @@ def ResNet50(num_classes):
 
 def ResNet18(num_classes):
     return stax.serial(
-        GeneralConv(('HWCN', 'OIHW', 'NHWC'), 1, (7, 7), (2, 2), 'SAME'),
+        GeneralConv(("HWCN", "OIHW", "NHWC"), 1, (7, 7), (2, 2), "SAME"),
         BatchNorm(), Relu, MaxPool((3, 3), strides=(2, 2)),
         BasicBlock(3, [64, 64]), IdentityBlock(3, [64, 64]),
         BasicBlock(3, [128, 128]), IdentityBlock(3, [128, 128]),
@@ -185,7 +185,7 @@ if __name__ == "__main__":
     def synth_batches():
         rng = npr.RandomState(0)
         while True:
-            images = rng.rand(*input_shape).astype('float32')
+            images = rng.rand(*input_shape).astype("float32")
             labels = rng.randint(num_classes, size=(batch_size, 1))
             onehot_labels = labels == jnp.arange(num_classes)
             yield images, onehot_labels

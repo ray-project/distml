@@ -53,11 +53,11 @@ class MnistTrainingOperator(JAXTrainingOperator):
         with FileLock(".ray.lock"):
             train_images, train_labels, test_images, test_labels = mnist()
 
-        train_images = train_images.reshape(
-            train_images.shape[0], 1, 28, 28).transpose(2, 3, 1, 0)
+        train_images = train_images.reshape(train_images.shape[0], 1, 28,
+                                            28).transpose(2, 3, 1, 0)
 
-        test_images = test_images.reshape(
-            test_images.shape[0], 1, 28, 28).transpose(2, 3, 1, 0)
+        test_images = test_images.reshape(test_images.shape[0], 1, 28,
+                                          28).transpose(2, 3, 1, 0)
 
         train_loader = Dataloader(
             train_images, train_labels, batch_size=batch_size, shuffle=True)
@@ -125,8 +125,7 @@ if __name__ == "__main__":
             "num_classes": 10,
             "model_name": args.model_name
         },
-        initialization_hook=initialization_hook
-    )
+        initialization_hook=initialization_hook)
 
     for i in range(args.num_epochs):
         strategy.train()

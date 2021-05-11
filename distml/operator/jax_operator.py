@@ -67,20 +67,17 @@ class JAXTrainingOperator(TrainingOperator):
         """Register a few critical information about the model to operator.
 
         Args:
-            model (tuple/list): a tuple/list has three elements.
-                            The first element should be opt_states
-                            that return from opt_init.The second
-                            element should be init_fun that used 
-                            to initialize model params. The third
-                            element should be predict_fun that
-                            feed params and inputs, return prediction.
-            optimizer (tuple/list): a tuple/list has three elements.
-                            The first element should be opt_init that
-                            used to initialize optimizer state. The
-                            second element should be opt_update that
-                            use to update the optimizer state. The third
-                            element should be get_params that feed opt_states
-                            and return the params.
+            model (tuple/list): a tuple/list has three elements. The first
+                element should be opt_states that return from opt_init.The
+                second element should be init_fun that used to initialize
+                model params. The third element should be predict_fun that
+                feed params and inputs, return prediction.
+            optimizer (tuple/list): a tuple/list has three elements. The
+                first element should be opt_init that used to initialize
+                optimizer state. The second element should be opt_update
+                that use to update the optimizer state. The third element
+                should be get_params that feed opt_states and return the
+                params.
             criterion (function): a function use to calculate the loss value.
             jit_mode (bool): use the jit mode in jax.
         """
