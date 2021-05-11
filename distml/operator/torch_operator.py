@@ -83,6 +83,11 @@ class TorchTrainingOperator(TrainingOperator):
         self._validation_loader = validation_loader
         # TODO(Hao): convert each data loader to be distributed
 
+    def setup(self, *args, **kwargs):
+        """Function that needs to be override by users."""
+        raise NotImplementedError("Please override this function to register "
+                                  "your model, optimizer, and criterion.")
+
     def derive_updates(self, batch):
         """Compute the parameter updates on a given batch of data.
 

@@ -1,5 +1,7 @@
 import numpy as np
 import cupy as cp
+
+import jax
 from jax import value_and_grad
 import jax.numpy as jnp
 from jax.lib import xla_client
@@ -8,7 +10,7 @@ from jax.tree_util import tree_flatten, tree_unflatten, tree_structure
 from jax._src.util import unzip2
 from jax.experimental.optimizers import OptimizerState
 
-from .base_operator import TrainingOperator
+from distml.operator.base_operator import TrainingOperator
 
 
 class JAXTrainingOperator(TrainingOperator):
@@ -45,7 +47,7 @@ class JAXTrainingOperator(TrainingOperator):
             # some code is the same for all users,
             # maybe we can put it in register.
             rng_key = random.PRNGKey(0)
-            input_shape = (28, 28, 1, batch_size)
+            input_shape = (28, 28, 1, 64)
             lr=0.01
             init_fun, predict_fun = ResNet18(num_classes)
             _, init_params = init_fun(rng_key, input_shape)
@@ -59,36 +61,91 @@ class JAXTrainingOperator(TrainingOperator):
                           optimizer=(opt_init, opt_update, get_params),
                           criterion=criterion)
         """
-        pass
+        raise NotImplementedError("Please override this function to register "
+                                  "your model, optimizer, and criterion.")
 
-    def register(self,
-                 *,
-                 model,
-                 optimizer,
-                 criterion,
-                 lr_schedulers=None,
-                 jit_mode=False):
-        """Register a few critical information about the model to operator."""
+    def register(self, *, model, optimizer, criterion, jit_mode=False):
+        """Register a few critical information about the model to operator.
+
+        Args:
+            model (tuple/list): a tuple/list has three elements. The first
+                element should be opt_states that return from opt_init.The
+                second element should be init_fun that used to initialize
+                model params. The third element should be predict_fun that
+                feed params and inputs, return prediction.
+            optimizer (tuple/list): a tuple/list has three elements. The
+                first element should be opt_init that used to initialize
+                optimizer state. The second element should be opt_update
+                that use to update the optimizer state. The third element
+                should be get_params that feed opt_states and return the
+                params.
+            criterion (function): a function use to calculate the loss value.
+            jit_mode (bool): use the jit mode in jax.
+        """
+
+        if not isinstance(model, (tuple, list)) and len(model) != 3:
+            raise RuntimeError("`model` must be a tuple or list and contains"
+                               "'opt_states', 'init_fun', 'predict_fun'."
+                               "Got: {} {}".format(type(model), len(model)))
+
+        if not isinstance(optimizer, (tuple, list)) and len(optimizer) != 3:
+            raise RuntimeError(
+                "`optimizer` must be a tuple or list and contains"
+                "'opt_init', 'opt_update' and 'get_params'."
+                "Got: {} {}".format(type(optimizer), len(optimizer)))
+
+        if not hasattr(criterion, "__call__"):
+            raise RuntimeError(
+                "The `criterion` must be callable function that "
+                "feed logits and target, return the loss value. "
+                "Got: {}".format(type(criterion)))
+
         self.criterion = criterion
-        if lr_schedulers:
-            self.lr_schedulers = lr_schedulers
-            print("WARNING: jax not support learning rate scheduler."
-                  "This will not work.")
-
         self._register_model(model)
         self._register_optimizer(optimizer)
 
     def _register_model(self, model):
-        """register model components.
+        """register model components."""
 
-         This function shall be instantiated in framework-specific operator
-         implementations.
-         """
+        if not isinstance(model[0],
+                          jax.experimental.optimizers.OptimizerState):
+            raise RuntimeError(
+                "The first elemente of `model` must be the "
+                "`opt_states` return from optimizer `opt_init`. "
+                "Got: {}".format(type(model[0])))
+
+        if not hasattr(model[1], "__call__"):
+            raise RuntimeError("The second elemente of `model` must be the "
+                               "`init_fun` return from model. "
+                               "Got: {}".format(type(model[1])))
+
+        if not hasattr(model[2], "__call__"):
+            raise RuntimeError("The third elemente of `model` must be the "
+                               "`predict_fun` return from model. "
+                               "Got: {}".format(type(model[2])))
+
         self.opt_state = model[0]
         self.init_fun = model[1]
         self.predict_fun = model[2]
 
     def _register_optimizer(self, optimizer):
+        """register optimizer components."""
+        if not hasattr(optimizer[0], "__call__"):
+            raise RuntimeError("The fist elemente of `optimizer` must be the "
+                               "`opt_init` return from optimizer. "
+                               "Got: {}".format(type(optimizer[1])))
+
+        if not hasattr(optimizer[1], "__call__"):
+            raise RuntimeError(
+                "The second elemente of `optimizer` must be the "
+                "`opt_update` return from optimizer. "
+                "Got: {}".format(type(optimizer[1])))
+
+        if not hasattr(optimizer[2], "__call__"):
+            raise RuntimeError("The third elemente of `optimizer` must be the "
+                               "`get_params` return from optimizer. "
+                               "Got: {}".format(type(optimizer[2])))
+
         self.opt_init = optimizer[0]
         self.opt_update = optimizer[1]
         self.get_params = optimizer[2]
@@ -110,6 +167,7 @@ class JAXTrainingOperator(TrainingOperator):
         `grad` in Jax to calculate gradients.
 
         Args:
+            params (list): The params return from get_params(opt_states).
             batch (tuple): a data batch containing a feature/target pair.
         """
         inputs, targets = batch
@@ -157,7 +215,7 @@ class JAXTrainingOperator(TrainingOperator):
         self.train_step_num += 1
 
     def to_cupy(self, tensor):
-        """Convert a torch GPU tensor to cupy tensor."""
+        """Convert a jax GPU tensor to cupy tensor."""
         if isinstance(tensor, list):
             return list(map(self.to_cupy, tensor))
         ctensor = cp.fromDlpack(self.get_jax_dlpack(tensor))
@@ -183,7 +241,7 @@ class JAXTrainingOperator(TrainingOperator):
         """Get the dlpack of a jax tensor.
 
         Jax api might cause different pointer address after the conversion.
-        We use the xla api to avoid this bug in jax api.
+        We use the xla api to avoid this bug.
         """
         return xla_client._xla.buffer_to_dlpack_managed_tensor(
             tensor.device_buffer, take_ownership=False)
@@ -284,6 +342,10 @@ class JAXTrainingOperator(TrainingOperator):
         self.opt_state = OptimizerState(new_states_flat, tree, new_subtrees)
 
     def reset_optimizer_for_params(self, params):
+        if not isinstance(params, dict):
+            raise RuntimeError("The `params` should be dict. "
+                               "Got {}".format(type(params)))
+
         keys, params = unzip2(sorted(params.items(), key=lambda d: int(d[0])))
         self.tree = tree_structure(params)
         self.opt_state = self.opt_init(params)
@@ -331,11 +393,11 @@ class JAXTrainingOperator(TrainingOperator):
         raise NotImplementedError(
             "load_parameters is not support in jax operator.")
 
-    def save_states(self, states):
+    def save_states(self, checkpoint):
         raise NotImplementedError(
             "save_states is not support in jax operator.")
 
-    def get_states(self, states):
+    def get_states(self):
         raise NotImplementedError("get_states is not support in jax operator.")
 
     def load_states(self, checkpoint):

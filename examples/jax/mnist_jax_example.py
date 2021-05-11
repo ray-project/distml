@@ -8,6 +8,7 @@ from distml.operator.jax_operator import JAXTrainingOperator
 from distml.strategy.allreduce_strategy import AllReduceStrategy
 from distml.strategy.ps_strategy import ParameterServerStrategy
 
+
 from ray.util.sgd.utils import override
 
 from jax import random
@@ -21,6 +22,7 @@ def initialization_hook():
     # Need this for avoiding a connection restart issue on AWS.
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "False"
 
     # set the below if needed
     # print("NCCL DEBUG SET")
@@ -64,10 +66,13 @@ class MnistTrainingOperator(JAXTrainingOperator):
         test_loader = Dataloader(
             test_images, test_labels, batch_size=batch_size)
 
+        def criterion(logits, targets):
+            return -jnp.sum(logits * targets)
+
         self.register(
             model=[opt_state, init_fun, predict_fun],
             optimizer=[opt_init, opt_update, get_params],
-            criterion=lambda logits, targets: -jnp.sum(logits * targets))
+            criterion=criterion)
 
         self.register_data(
             train_loader=train_loader, validation_loader=test_loader)
@@ -83,7 +88,8 @@ def make_ar_strategy(args):
             "num_workers": args.num_workers,
             "num_classes": 10,
             "model_name": args.model_name
-        })
+        },
+        initialization_hook=initialization_hook)
     return strategy
 
 
@@ -159,6 +165,5 @@ if __name__ == "__main__":
     for i in range(args.num_epochs):
         strategy.train()
     print(strategy.validate())
-
     strategy.shutdown()
     print("success!")
