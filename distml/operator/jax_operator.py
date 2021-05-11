@@ -352,42 +352,6 @@ class JAXTrainingOperator(TrainingOperator):
         self.tree = tree_structure(params)
         self.opt_state = self.opt_init(params)
 
-    @staticmethod
-    def ones(shape, cpu=True):
-        if cpu:
-            return np.ones(shape)
-        else:
-            return jnp.ones(shape)
-
-    @staticmethod
-    def zeros(shape, cpu=True):
-        if cpu:
-            return np.zeros(shape)
-        else:
-            return jnp.zeros(shape)
-
-    @staticmethod
-    def ones_like(x, cpu=True):
-        if cpu:
-            return np.ones_like(x)
-        else:
-            return jnp.ones_like(x)
-
-    @staticmethod
-    def zeros_like(x, cpu=True):
-        if cpu:
-            return np.zeros_like(x)
-        else:
-            return jnp.zeros_like(x)
-
-    @staticmethod
-    def numel(v):
-        return np.size(v)
-
-    @staticmethod
-    def asarray(v):
-        return jnp.asarray(v)
-
     def clean_redundancy(self):
         del self._train_loader
         del self._validation_loader
@@ -401,11 +365,11 @@ class JAXTrainingOperator(TrainingOperator):
         raise NotImplementedError(
             "load_parameters is not support in jax operator.")
 
-    def save_states(self, states):
+    def save_states(self, checkpoint):
         raise NotImplementedError(
             "save_states is not support in jax operator.")
 
-    def get_states(self, states):
+    def get_states(self):
         raise NotImplementedError("get_states is not support in jax operator.")
 
     def load_states(self, checkpoint):

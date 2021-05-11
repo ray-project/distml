@@ -20,7 +20,7 @@ def initialization_hook():
     # Need this for avoiding a connection restart issue on AWS.
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"
-
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "False"
     # set the below if needed
     # print("NCCL DEBUG SET")
     # os.environ["NCCL_DEBUG"] = "INFO"
@@ -124,11 +124,12 @@ if __name__ == "__main__":
             "num_workers": args.num_workers,
             "num_classes": 10,
             "model_name": args.model_name
-        })
+        },
+        initialization_hook=initialization_hook
+    )
 
     for i in range(args.num_epochs):
         strategy.train()
     print(strategy.validate())
-
     strategy.shutdown()
     print("success!")
