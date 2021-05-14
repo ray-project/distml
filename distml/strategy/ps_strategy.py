@@ -1,10 +1,11 @@
+from typing import Tuple, List, Callable, Mapping, Union, Any, Optional, Sequence
 import ray
 import ray.util.collective as col
 
 import numpy as np
 
 import distml.util as util
-from distml.strategy.base_strategy import BaseStrategy
+from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
 from distml.util import ThroughputCollection
 
 import logging
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class ParameterServerStrategy(BaseStrategy):
-    """Strategy that trains a model via collective AllReduce.
+    """Strategy that trains a model via parameter server.
 
     Args:
         training_operator_cls (TrainingOperator):
@@ -22,7 +23,7 @@ class ParameterServerStrategy(BaseStrategy):
         initialization_hook (function): A function to call on all training
             workers when they are first initialized. This could be useful to
             set environment variables for all the worker processes.
-        num_workers (int): The number of workers.
+        num_worker (int): The number of workers.
         num_ps (int): The number of parameter servers.
         num_cpus_per_worker (int): number of CPUs allocated per worker.
         num_gpus_per_worker (int): number of GPUs allocated per worker.
@@ -33,27 +34,35 @@ class ParameterServerStrategy(BaseStrategy):
     def __init__(self,
                  *,
                  training_operator_cls,
-                 operator_config=None,
-                 initialization_hook=None,
-                 num_workers=1,
-                 num_ps=1,
-                 num_cpus_per_worker=1,
-                 num_gpus_per_worker=1,
-                 num_cpus_per_server=1,
-                 num_gpus_per_server=1,
+                 operator_config: Optional[Mapping[str, Any]] = None,
+                 initialization_hook: Optional[Callable] = None,
+                 world_size: int = 2,
+                 num_worker: int = 1,
+                 num_ps: int = 1,
+                 backend="nccl",
+                 group_name="default",
+                 num_cpus_per_worker: int = 1,
+                 num_gpus_per_worker: int = 1,
+                 num_cpus_per_server: int = 1,
+                 num_gpus_per_server: int = 1,
                  **kwargs):
-        self.assignments = None
 
-        assert num_ps
+        assert world_size == num_ps + num_worker, \
+            "'world_size' should be equal to 'num_ps' plus 'num_worker'"
+
+        self.assignments = None
         self.num_ps = num_ps
-        self.num_workers = num_workers
+        self.num_worker = num_worker
         self.num_cpus_per_server = num_cpus_per_server
         self.num_gpus_per_server = num_gpus_per_server
 
-        super(ParameterServerStrategy, self).\
+        super(ParameterServerStrategy, self). \
             __init__(training_operator_cls=training_operator_cls,
                      operator_config=operator_config,
                      initialization_hook=initialization_hook,
+                     world_size=world_size,
+                     backend=backend,
+                     group_name=group_name,
                      num_cpus_per_worker=num_cpus_per_worker,
                      num_gpus_per_worker=num_gpus_per_worker,
                      **kwargs)
@@ -94,17 +103,13 @@ class ParameterServerStrategy(BaseStrategy):
             ray.get([server.set_params.remote(this_shard_ref)])
 
     def _start_workers(self):
-        """Create worker(actor), maybe need worker group to manager these workers.
-           Or, send these workers to strategy to manager?
-
-           set workers or worker group
-           set worker info, record rank, backend, use_num_gpus?
+        """Start worker group and server group.
         """
         # TODO (Hao): infer the per-replica batch size here...
 
         # so here we get two set of params that will be passed around:
         # (1) Those for setting up training logic in training_operator,
-        # including: batchsize, use_tqdm, user defined operator_config.
+        # including: batch size, user defined operator_config.
         operator_config = self._operator_config.copy()
         params = dict(
             training_operator_cls=self.training_operator_cls,
@@ -116,62 +121,66 @@ class ParameterServerStrategy(BaseStrategy):
         dist_params_worker = dict(
             strategy="ps",
             is_server=False,
-            group_name="default",
+            backend=self.backend,
+            group_name=self.group_name,
             num_ps=self.num_ps,
-            num_workers=self.num_workers,
+            num_worker=self.num_worker,
         )
 
         dist_params_server = dict(
             strategy="ps",
             is_server=True,
-            group_name="default",
+            backend=self.backend,
+            group_name=self.group_name,
             num_ps=self.num_ps,
-            num_workers=self.num_workers,
+            num_worker=self.num_worker,
         )
 
         # (3) other arguments that used to init the DataParallelGrup
-        workergroup_init_args = {
-            "params": params,
-            "dist_params": dist_params_worker,
-            "num_cpus_per_actor": self.num_cpus_per_worker,
-            "num_gpus_per_actor": self.num_gpus_per_worker,
-        }
+        worker_group_init_args = dict(
+            actor_params=params,
+            dist_params=dist_params_worker,
+            num_cpus_per_actor=self.num_cpus_per_worker,
+            num_gpus_per_actor=self.num_gpus_per_worker,
+            initialization_hook=self.initialization_hook,
+        )
 
-        servergroup_init_args = {
-            "params": params,
-            "dist_params": dist_params_server,
-            "num_cpus_per_actor": self.num_cpus_per_server,
-            "num_gpus_per_actor": self.num_gpus_per_server,
-        }
+        server_group_init_args = dict(
+            actor_params=params,
+            dist_params=dist_params_server,
+            num_cpus_per_actor=self.num_cpus_per_server,
+            num_gpus_per_actor=self.num_gpus_per_server,
+            initialization_hook=self.initialization_hook,
+        )
 
         # Should we make two groups for worker and server?
-        self.worker_group = DataParallelGroup(**workergroup_init_args)
-        self.server_group = DataParallelGroup(**servergroup_init_args)
+        self.worker_group = DataParallelGroup(**worker_group_init_args)
+        self.server_group = DataParallelGroup(**server_group_init_args)
 
         # Once the group is created, we start it.
-        self.worker_group.start_actors(self.num_workers)
-        self.server_group.start_actors(
-            self.num_ps)  # server at the last num_ps processes.
+        self.worker_group._start_actors(self.num_worker)
+        # server at the last num_ps processes.
+        self.server_group._start_actors(self.num_ps)
 
-        worker_rets = self.worker_group.test_connection()
-        server_rets = self.server_group.test_connection()
-        ray.get(worker_rets + server_rets)
+        # worker_rets = self.worker_group.test_connection()
+        # server_rets = self.server_group.test_connection()
+        # ray.get(worker_rets + server_rets)
         ray.get(self.worker_group.setup_operator())
         ray.get(self.server_group.setup_operator())
 
         self.server_group.clean_redundancy()
 
-    def shutdown(self, force=False):
+    def shutdown(self, force: bool = False):
         self.worker_group.shutdown(force=force)
         self.server_group.shutdown(force=force)
 
-    def save_parameters(self, checkpoint):
+    def save_parameters(self, checkpoint: str):
         # TODO(HUI): ps save parameters.
         # First, worker rank 0 should pull the latest parameter from servers
         # Then, worker rank 0 save parameters
         self.worker_group.save_parameters(checkpoint)
 
-    def load_parameters(self, checkpoint):
+    def load_parameters(self, checkpoint: str):
         # TODO(HUI): ps load parameters.
         # shard parameters and send to all servers.
         self.server_group.load_parameters(checkpoint)
@@ -189,7 +198,7 @@ class ParameterServerStrategy(BaseStrategy):
         print("Load of each ps {}".format(loads))
         self.assignments = assignments
 
-    def train(self, num_steps=None):
+    def train(self, num_steps: Optional[int] = None) -> dict:
         # TODO (Hao): add fault tolerance using `max_retries`.
         steps = num_steps if num_steps \
             else self.worker_group.get_data_loader_len()
@@ -201,10 +210,10 @@ class ParameterServerStrategy(BaseStrategy):
         for idx in range(steps):
             with self._collector.record("train"):
                 metrics = self.train_batch()
-            logger.info("Step: {}/{}".format(idx, steps))
+            print("Step: {}/{}".format(idx, steps))
         return metrics
 
-    def validate(self, num_steps=None):
+    def validate(self, num_steps: Optional[int] = None):
         steps = num_steps if num_steps \
             else self.worker_group.get_data_loader_len(training=False)
         self.worker_group.make_iterator(training=False)
@@ -215,7 +224,7 @@ class ParameterServerStrategy(BaseStrategy):
         # Validate results should be the same in all workers
         return batch_metrics
 
-    def train_batch(self):
+    def train_batch(self) -> dict:
         loss_vals = []
         rets = []
         metrics = {}
@@ -241,7 +250,7 @@ class ParameterServerStrategy(BaseStrategy):
 
 
 class PS(object):
-    def __init__(self, training_operator_cls, operator_config):
+    def __init__(self, training_operator_cls, operator_config: Optional[Mapping[str, Any]]):
         self.training_operator_cls = training_operator_cls
         self.operator_config = operator_config
 
@@ -254,34 +263,34 @@ class PS(object):
             self.operator_config)
 
     def setup_collective_group(self,
-                               rank,
-                               num_ps,
-                               num_workers,
-                               backend="nccl",
-                               group_name="default"):
+                               rank: int,
+                               num_ps: int,
+                               num_worker: int,
+                               backend: str = "nccl",
+                               group_name: str = "default"):
         # rank should be true rank. means, rank has already plus num_worker.
         self.rank = rank
         self.num_ps = num_ps
-        self.num_workers = num_workers
+        self.num_worker = num_worker
         self.group_name = group_name
-        self.group_size = num_ps + num_workers
+        self.group_size = num_ps + num_worker
         self._init_grad_counts()
         # the last num_ps processes are servers.
         col.init_collective_group(
-            num_ps + num_workers, rank, backend=backend, group_name=group_name)
+            num_ps + num_worker, rank, backend=backend, group_name=group_name)
 
     def test_connection(self):
-        for i in range(self.num_workers):
-            recv = util.zeros((1, ), cpu=False)
+        for i in range(self.num_worker):
+            recv = util.zeros((1,), cpu=False)
             col.recv(recv, i, self.group_name)
             assert recv == 1
-        for i in range(self.num_workers):
-            send = util.ones((1, ), cpu=False)
+        for i in range(self.num_worker):
+            send = util.ones((1,), cpu=False)
             col.send(send, i, self.group_name)
         return
 
     def _init_grad_counts(self):
-        self.grad_counts = [0] * self.num_workers
+        self.grad_counts = [0] * self.num_worker
 
     def _init_grad_buffer(self):
         self.grad_buffer = {
@@ -289,7 +298,7 @@ class PS(object):
             for k, v in self.params.items()
         }
 
-    def get_params(self):
+    def get_params(self) -> dict:
         return self.params
 
     def set_params(self, params):
@@ -302,7 +311,7 @@ class PS(object):
         self._init_grad_buffer()
 
     def apply_updates(self, grad_buffer):
-        # TODO(HUI): gradient divide by num_workers
+        # TODO(HUI): gradient divide by num_worker
         self.training_operator.apply_updates(grad_buffer)
         self.params = self.training_operator.get_named_parameters(cpu=False)
 
@@ -311,13 +320,13 @@ class PS(object):
             if gradients[name] is not None:
                 self.grad_buffer[name] += gradients[name]
 
-    def send_params(self, dst_rank):
+    def send_params(self, dst_rank: int):
         """ Send this param shard to the destination worker """
         for name, v in self.params.items():
             cv = self.training_operator.to_cupy(v)
             col.send(cv, dst_rank, self.group_name)
 
-    def update(self, src_rank):
+    def update(self, src_rank: int):
         """Receive gradients and update"""
         keys = list(self.params.keys())
         grads = dict()
@@ -340,7 +349,7 @@ class PS(object):
             self.grad_counts[src_rank] = 1
         else:
             raise RuntimeError(f"This worker {src_rank} send gradients again.")
-        if sum(self.grad_counts) == self.num_workers:
+        if sum(self.grad_counts) == self.num_worker:
             self.apply_updates(self.grad_buffer)
 
             self._init_grad_buffer()
@@ -359,7 +368,7 @@ class PS(object):
 
 
 class Worker(object):
-    def __init__(self, training_operator_cls, operator_config):
+    def __init__(self, training_operator_cls, operator_config: Optional[Mapping[str, Any]]):
         self.training_operator_cls = training_operator_cls
         self.operator_config = operator_config
 
@@ -375,29 +384,29 @@ class Worker(object):
             self.operator_config)
 
     def setup_collective_group(self,
-                               rank,
-                               num_ps,
-                               num_workers,
-                               backend="nccl",
-                               group_name="default"):
+                               rank: int,
+                               num_ps: int,
+                               num_worker: int,
+                               backend: str = "nccl",
+                               group_name: str = "default"):
         self.rank = rank
         self.num_ps = num_ps
-        self.num_workers = num_workers
+        self.num_worker = num_worker
         self.group_name = group_name
-        self.group_size = num_ps + num_workers
+        self.group_size = num_ps + num_worker
         self.name_list = [[] for i in range(num_ps)]
 
         # the last num_ps processes are servers.
         col.init_collective_group(
-            num_ps + num_workers, rank, backend=backend, group_name=group_name)
+            num_ps + num_worker, rank, backend=backend, group_name=group_name)
 
     def test_connection(self):
         for i in range(self.num_ps):
-            send = util.ones((1, ), cpu=False)
-            col.send(send, self.num_workers + i, self.group_name)
+            send = util.ones((1,), cpu=False)
+            col.send(send, self.num_worker + i, self.group_name)
         for i in range(self.num_ps):
-            recv = util.zeros((1, ), cpu=False)
-            col.recv(recv, self.num_workers + i, self.group_name)
+            recv = util.zeros((1,), cpu=False)
+            col.recv(recv, self.num_worker + i, self.group_name)
             assert recv == 1
         return
 
@@ -408,7 +417,7 @@ class Worker(object):
             distribution.append(self.training_operator.numel(v))
         return distribution
 
-    def make_iterator(self, training=True):
+    def make_iterator(self, training: bool = True):
         """Convert loader to be an iterator at the start of an epoch."""
         # TODO(Hao): need to check whether reaching the boundary of iterator
         #            instead of making a new one every time.
@@ -419,7 +428,7 @@ class Worker(object):
             self.validation_iterator = iter(
                 self.training_operator._get_validation_loader())
 
-    def get_data_loader_len(self, training=True):
+    def get_data_loader_len(self, training: bool = True):
         """Return the number of batches in the data loader."""
         loader = self.training_operator._get_train_loader() if training \
             else self.training_operator._get_validation_loader()
@@ -430,9 +439,8 @@ class Worker(object):
                 "Data loader has no attribute `__len__`. "
                 "Please set `num_steps` in `train()` or `validate()`.")
 
-    def derive_updates(self, batch):
+    def derive_updates(self, batch: Sequence[Any]):
         # TODO (Hao): handling data loader next.
-        # TODO (Hao): change it to derive_update and apply_update.
         return self.training_operator.derive_updates(batch)
 
     def compute_gradients(self, params):
@@ -472,16 +480,16 @@ class Worker(object):
             shards[assignments[i]][k] = v
         return shards
 
-    def index_shard(self, shards, index):
+    def index_shard(self, shards, index: int):
         return shards[index]
 
     def set_parameters(self, params):
         return self.training_operator.set_parameters(params)
 
-    def get_parameters(self, cpu):
+    def get_parameters(self, cpu: bool):
         return self.training_operator.get_parameters(cpu)
 
-    def get_named_parameters(self, cpu):
+    def get_named_parameters(self, cpu: bool):
         return self.training_operator.get_named_parameters(cpu)
 
     def get_gradients(self):
@@ -516,7 +524,7 @@ class Worker(object):
         for i in range(self.num_ps):
             for j in range(len(self.name_list[i])):
                 v = self.training_operator.to_cupy(recv_list[i][j])
-                col.recv(v, self.num_workers + i, self.group_name)
+                col.recv(v, self.num_worker + i, self.group_name)
 
         # 3. Set params in workers and compute gradients.
         for i in range(self.num_ps):
@@ -533,7 +541,7 @@ class Worker(object):
             this_shard = self.index_shard(split_grad, i)
             for _, v in this_shard.items():
                 cv = self.training_operator.to_cupy(v)
-                col.send(cv, self.num_workers + i, self.group_name)
+                col.send(cv, self.num_worker + i, self.group_name)
         return metrics
 
     def validate_batch(self):
@@ -553,33 +561,42 @@ class Worker(object):
         return 1
 
 
-class DataParallelGroup:
-    """Spawn a group a replicas for data-parallel training."""
+class DataParallelGroup(BaseDataParallelGroup):
+    """Spawn a actor group for data-parallel training."""
 
-    def __init__(self, params, dist_params, num_cpus_per_actor,
-                 num_gpus_per_actor):
-        self._params = params
-        self._dist_params = dist_params
-        self._num_cpus_per_actor = num_cpus_per_actor
-        self._num_gpus_per_actor = num_gpus_per_actor
-
+    def __init__(self,
+                 actor_params: Mapping[str, Any],
+                 dist_params: Mapping[str, Any],
+                 num_cpus_per_actor: int,
+                 num_gpus_per_actor: int,
+                 initialization_hook: Optional[Callable]):
+        super(DataParallelGroup, self).__init__(actor_params=actor_params,
+                                                dist_params=dist_params,
+                                                num_cpus_per_actor=num_cpus_per_actor,
+                                                num_gpus_per_actor=num_gpus_per_actor,
+                                                initialization_hook=initialization_hook)
         self.is_server = self._dist_params["is_server"]
         self.num_ps = self._dist_params["num_ps"]
-        self.num_workers = self._dist_params["num_workers"]
+        self.num_worker = self._dist_params["num_worker"]
 
         self._distributed_actors = None
 
-    def _setup_collective_group(self, num_replicas):
+    def _setup_collective_group(self,
+                                num_ps: int,
+                                num_worker: int,
+                                backend: int,
+                                group_name: str = "default"):
         if self._dist_params["strategy"] == "ps":
-            num_ps = self._dist_params["num_ps"]
-            num_workers = self._dist_params["num_workers"]
             is_server = self.is_server
+
             rets = [
                 actor.setup_collective_group.remote(
-                    rank=i + is_server * num_workers,
-                    num_workers=num_workers,
+                    rank=i + is_server * num_worker,
+                    num_worker=num_worker,
                     num_ps=num_ps,
-                    backend="nccl")
+                    backend=backend,
+                    group_name=group_name
+                )
                 for i, actor in enumerate(self._distributed_actors)
             ]
         else:  # this can be extend for allreduce.
@@ -593,7 +610,7 @@ class DataParallelGroup:
         ]
         return setups
 
-    def start_actors(self, num_actors):
+    def _start_actors(self, num_actors: int):
         if self.is_server:
             RemoteActor = ray.remote(
                 num_cpus=self._num_cpus_per_actor,
@@ -604,11 +621,12 @@ class DataParallelGroup:
                 num_gpus=self._num_gpus_per_actor)(Worker)
 
         self._distributed_actors = [
-            RemoteActor.remote(**self._params) for _ in range(num_actors)
+            RemoteActor.remote(**self._actor_params) for _ in range(num_actors)
         ]
 
         # setup the rank and group in each replica
-        ray.get(self._setup_collective_group(len(self._distributed_actors)))
+        ray.get(self._setup_collective_group(
+            self.num_ps, self.num_worker, self.backend, self.group_name))
 
     def test_connection(self):
         rets = [
@@ -624,13 +642,13 @@ class DataParallelGroup:
         ]
         return rets
 
-    def _make_iterator(self, training):
+    def _make_iterator(self, training: bool):
         return [actor.make_iterator.remote(training) for actor in self.actors]
 
-    def make_iterator(self, training=True):
+    def make_iterator(self, training: bool = True):
         ray.get(self._make_iterator(training))
 
-    def get_data_loader_len(self, training=True):
+    def get_data_loader_len(self, training: bool = True):
         """Return the number of batches in the data loader."""
         lens = ray.get([
             actor.get_data_loader_len.remote(training=training)
@@ -651,7 +669,7 @@ class DataParallelGroup:
         stats = ray.get(rets)
         return stats
 
-    def shutdown(self, force=False):
+    def shutdown(self, force: bool = False):
         rets = [actor.shutdown.remote() for _, actor in enumerate(self.actors)]
         stats = ray.get(rets)
         return stats
@@ -663,11 +681,11 @@ class DataParallelGroup:
     def actors(self):
         return self._distributed_actors
 
-    def save_parameters(self, checkpoint):
+    def save_parameters(self, checkpoint: str):
         rets = [self.actors[0].save_parameters.remote(checkpoint)]
         ray.get(rets)
 
-    def load_parameters(self, checkpoint):
+    def load_parameters(self, checkpoint: str):
         rets = [
             actor.load_parameters.remote(checkpoint)
             for _, actor in enumerate(self.actors)
@@ -681,11 +699,11 @@ class DataParallelGroup:
         ]
         ray.get(rets)
 
-    def get_parameters(self, cpu=False):
+    def get_parameters(self, cpu: bool = False):
         ret = self.actors[0].get_parameters.remote(cpu)
         return ray.get([ret])[0]
 
-    def get_named_parameters(self, cpu=False):
+    def get_named_parameters(self, cpu: bool = False):
         ret = self.actors[0].get_named_parameters.remote(cpu)
         return ray.get([ret])[0]
 

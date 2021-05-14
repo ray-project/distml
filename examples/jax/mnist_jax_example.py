@@ -81,11 +81,11 @@ class MnistTrainingOperator(JAXTrainingOperator):
 def make_ar_strategy(args):
     strategy = AllReduceStrategy(
         training_operator_cls=MnistTrainingOperator,
-        world_size=args.num_workers,
+        world_size=args.num_worker,
         operator_config={
             "lr": 0.01,
             "batch_size": 128,
-            "num_workers": args.num_workers,
+            "num_worker": args.num_worker,
             "num_classes": 10,
             "model_name": args.model_name
         },
@@ -96,8 +96,8 @@ def make_ar_strategy(args):
 def make_ps_strategy(args):
     strategy = ParameterServerStrategy(
         training_operator_cls=MnistTrainingOperator,
-        world_size=args.num_workers,
-        num_workers=args.num_workers - args.num_ps,
+        world_size=args.num_worker,
+        num_worker=args.num_worker - args.num_ps,
         num_ps=args.num_ps,
         operator_config={
             "lr": 0.01,
@@ -116,7 +116,7 @@ if __name__ == "__main__":
         type=str,
         help="the address to use for connecting to the Ray cluster")
     parser.add_argument(
-        "--num-workers",
+        "--num-worker",
         "-n",
         type=int,
         default=2,
@@ -150,8 +150,8 @@ if __name__ == "__main__":
         ray.init(args.address)
     else:
         ray.init(
-            num_gpus=args.num_workers,
-            num_cpus=args.num_workers * 2,
+            num_gpus=args.num_worker,
+            num_cpus=args.num_worker * 2,
             log_to_driver=True)
 
     if args.strategy == "ar":

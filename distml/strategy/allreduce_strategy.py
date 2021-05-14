@@ -1,8 +1,9 @@
 import logging
+from typing import Callable, Mapping, Any, Optional
 
 import ray
 import ray.util.collective as col
-from distml.strategy.base_strategy import BaseStrategy
+from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
 from distml.util import ThroughputCollection
 
 import numpy as np
@@ -29,17 +30,21 @@ class AllReduceStrategy(BaseStrategy):
     def __init__(self,
                  *,
                  training_operator_cls,
-                 operator_config=None,
-                 initialization_hook=None,
-                 world_size=2,
-                 num_cpus_per_worker=1,
-                 num_gpus_per_worker=1,
+                 operator_config: Optional[Mapping[str, Any]] = None,
+                 initialization_hook: Optional[Callable] = None,
+                 world_size: int = 2,
+                 backend: str = "nccl",
+                 group_name: str = "default",
+                 num_cpus_per_worker: int = 1,
+                 num_gpus_per_worker: int = 1,
                  **kwargs):
         super(AllReduceStrategy, self). \
             __init__(training_operator_cls=training_operator_cls,
                      operator_config=operator_config,
                      initialization_hook=initialization_hook,
                      world_size=world_size,
+                     backend=backend,
+                     group_name=group_name,
                      num_cpus_per_worker=num_cpus_per_worker,
                      num_gpus_per_worker=num_gpus_per_worker,
                      **kwargs)
@@ -52,7 +57,7 @@ class AllReduceStrategy(BaseStrategy):
         else:
             self._collector = ThroughputCollection()
 
-    def train(self, num_steps=None):
+    def train(self, num_steps: Optional[int] = None):
         """Run the training on parallel workers.
 
         Args:
@@ -74,7 +79,7 @@ class AllReduceStrategy(BaseStrategy):
             print("Step: {}/{}".format(idx, steps))
         return metrics
 
-    def validate(self, num_steps=None):
+    def validate(self, num_steps: Optional[int] = None):
         """Evaluates the model on the validation data.
 
         Args:
@@ -111,26 +116,26 @@ class AllReduceStrategy(BaseStrategy):
         # (2) params for setting up collective group and strategy prep-ups.
         dist_params = dict(
             strategy="allreduce",
-            backend="nccl",
-            group_name="default",
+            backend=self.backend,
+            group_name=self.group_name,
         )
         group_init_args = dict(
-            replica_params=replica_params,
+            actor_params=replica_params,
             dist_params=dist_params,
             initialization_hook=self.initialization_hook,
-            num_cpus_per_worker=self.num_cpus_per_worker,
-            num_gpus_per_worker=self.num_gpus_per_worker)
+            num_cpus_per_actor=self.num_cpus_per_worker,
+            num_gpus_per_actor=self.num_gpus_per_worker)
         self.data_parallel_group = DataParallelGroup(**group_init_args)
         # Once the group is created, we start it.
         self.data_parallel_group.start_replicas(self.world_size)
 
-    def shutdown(self, force=False):
+    def shutdown(self, force: bool = False):
         self.data_parallel_group.shutdown(force=force)
 
-    def save_parameters(self, checkpoint):
+    def save_parameters(self, checkpoint: str):
         self.data_parallel_group.save_parameters(checkpoint)
 
-    def load_parameters(self, checkpoint):
+    def load_parameters(self, checkpoint: str):
         self.data_parallel_group.load_parameters(checkpoint)
 
     def _init_strategy(self):
@@ -144,7 +149,7 @@ class Replica:
     and Ray collective group setup.
     """
 
-    def __init__(self, training_operator_cls, operator_config):
+    def __init__(self, training_operator_cls, operator_config: Optional[Mapping[str, Any]]):
         self.training_operator_cls = training_operator_cls
         self.operator_config = operator_config
         # Training operator
@@ -165,17 +170,17 @@ class Replica:
             operator_config=self.operator_config)
 
     def setup_collective_group(self,
-                               rank,
-                               world_size,
-                               backend,
-                               group_name="default"):
+                               rank: int,
+                               world_size: str,
+                               backend: str,
+                               group_name: str = "default"):
         self._rank = rank
         self._group_name = group_name
         self._world_size = world_size
         col.init_collective_group(
             world_size, rank, backend=backend, group_name=group_name)
 
-    def make_iterator(self, training=True):
+    def make_iterator(self, training: bool = True):
         """Convert loader to be an iterator at the start of an epoch."""
         # TODO(Hao): need to check whether reaching the boundary of iterator
         #            instead of making a new one every time.
@@ -184,7 +189,7 @@ class Replica:
         else:
             self.validation_iterator = iter(self.validation_loader)
 
-    def get_data_loader_len(self, training=True):
+    def get_data_loader_len(self, training: bool = True):
         """Return the number of batches in the data loader."""
         loader = self.train_loader if training \
             else self.validation_loader
@@ -195,7 +200,7 @@ class Replica:
                 "Data loader has no attribute `__len__`. "
                 "Please set `num_steps` in `train()` or `validate()`.")
 
-    def train_batch(self):
+    def train_batch(self) -> dict:
         metrics = {}
         try:
             batch = next(self.train_iterator)
@@ -209,16 +214,14 @@ class Replica:
         for _, g in updates.items():
             cg = self.training_operator.to_cupy(g)
             col.allreduce(cg)
-            # TODO(Hao): this is conflicting with Runhui's code though.
             cg = cg / float(self.world_size)
         self.apply_updates(updates)
         return metrics
 
-    def derive_updates(self, batch):
+    def derive_updates(self, batch) -> dict:
         return self.training_operator.derive_updates(batch)
 
     def apply_updates(self, updates):
-        # TODO(Hao): conflicting with Runhui's code on averaging grads
         self.training_operator.apply_updates(updates)
 
     def updates_transform(self, updates):
@@ -240,13 +243,13 @@ class Replica:
             del self.training_operator
         return 1
 
-    def save_parameters(self, checkpoint):
+    def save_parameters(self, checkpoint: str):
         self.training_operator.save_parameters(checkpoint)
 
-    def load_parameters(self, checkpoint):
+    def load_parameters(self, checkpoint: str):
         self.training_operator.load_parameters(checkpoint)
 
-    def apply(self, fn):
+    def apply(self, fn: Callable):
         """Apply a function in the replica process."""
         return fn()
 
@@ -271,45 +274,43 @@ class Replica:
         return self._group_name
 
 
-class DataParallelGroup:
-    """Spawn a group a replicas for data-parallel training."""
+class DataParallelGroup(BaseDataParallelGroup):
+    """Spawn a replica group for data-parallel training."""
 
-    def __init__(self, replica_params, dist_params, initialization_hook,
-                 num_cpus_per_worker, num_gpus_per_worker):
-        self._replica_params = replica_params
-        self._dist_params = dist_params
-
-        # try to unroll the dist_params
-        self._backend = self._dist_params["backend"]
-        self._group_name = self._dist_params["group_name"]
-
-        self._initialization_hook = initialization_hook
-        self._num_cpus_per_worker = num_cpus_per_worker
-        self._num_gpus_per_worker = num_gpus_per_worker
+    def __init__(self,
+                 actor_params: Mapping[str, Any],
+                 dist_params: Mapping[str, Any],
+                 num_cpus_per_actor: int,
+                 num_gpus_per_actor: int,
+                 initialization_hook: Optional[Callable]):
+        super(DataParallelGroup, self).__init__(actor_params=actor_params,
+                                                dist_params=dist_params,
+                                                num_cpus_per_actor=num_cpus_per_actor,
+                                                num_gpus_per_actor=num_gpus_per_actor,
+                                                initialization_hook=initialization_hook)
         self._replicas = None
 
     @property
+    def _replica_params(self):
+        return self._actor_params
+
+    @property
     def replicas(self):
-        return self._replicas
-
-    @property
-    def world_size(self):
-        return len(self._replicas)
-
-    @property
-    def backend(self):
-        return self._backend
+        return self._actors
 
     @property
     def group_name(self):
         return self._group_name
 
-    def start_replicas(self, num_replicas):
+    def start_replicas(self, num_replicas: int):
+        self._start_actors(num_replicas)
+
+    def _start_actors(self, num_replicas: int):
         assert num_replicas > 1
         RemoteReplica = ray.remote(
-            num_cpus=self._num_cpus_per_worker,
-            num_gpus=self._num_gpus_per_worker)(Replica)
-        self._replicas = [
+            num_cpus=self._num_cpus_per_actor,
+            num_gpus=self._num_gpus_per_actor)(Replica)
+        self._actors = [
             RemoteReplica.remote(**self._replica_params)
             for _ in range(num_replicas)
         ]
@@ -327,16 +328,16 @@ class DataParallelGroup:
         operator_setups = self._setup_operator()
         ray.get(operator_setups)
 
-    def _make_iterator(self, training):
+    def _make_iterator(self, training: bool):
         return [
             replica.make_iterator.remote(training=training)
             for replica in self.replicas
         ]
 
-    def make_iterator(self, training=True):
+    def make_iterator(self, training: bool = True):
         ray.get(self._make_iterator(training=training))
 
-    def get_data_loader_len(self, training=True):
+    def get_data_loader_len(self, training: bool = True):
         """Return the number of batches in the data loader."""
         lens = ray.get([
             replica.get_data_loader_len.remote(training=training)
@@ -361,7 +362,7 @@ class DataParallelGroup:
         stats = ray.get(rets)
         return stats
 
-    def shutdown(self, force=False):
+    def shutdown(self, force: bool = False):
         rets = [replica.shutdown.remote() for replica in self.replicas]
         stats = ray.get(rets)
         return stats
@@ -369,11 +370,11 @@ class DataParallelGroup:
     def reset(self):
         pass
 
-    def save_parameters(self, checkpoint):
+    def save_parameters(self, checkpoint: str):
         rets = [self.replicas[0].save_parameters.remote(checkpoint)]
         ray.get(rets)
 
-    def load_parameters(self, checkpoint):
+    def load_parameters(self, checkpoint: str):
         rets = [
             replica.load_parameters.remote(checkpoint)
             for _, replica in enumerate(self.replicas)
@@ -387,15 +388,15 @@ class DataParallelGroup:
         ]
         ray.get(rets)
 
-    def get_parameters(self, cpu=False):
+    def get_parameters(self, cpu: bool = False):
         ret = self.replicas[0].get_parameters.remote(cpu)
         return ray.get(ret)[0]
 
-    def get_named_parameters(self, cpu=False):
+    def get_named_parameters(self, cpu: bool = False):
         ret = self.replicas[0].get_named_parameters.remote(cpu)
         return ray.get([ret])[0]
 
-    def apply_all_replicas(self, fn):
+    def apply_all_replicas(self, fn: Callable):
         """Apply fn in all replica processes and wait until completion."""
         return ray.get(self._apply_all_replicas(fn))
 
@@ -404,13 +405,13 @@ class DataParallelGroup:
         return [replica.apply.remote(fn) for replica in self.replicas]
 
     def _setup_collective_group(self,
-                                world_size,
-                                backend,
-                                group_name="default"):
+                                group_size: int,
+                                backend: int,
+                                group_name: str = "default"):
         refs = [
             replica.setup_collective_group.remote(
                 rank=i,
-                world_size=world_size,
+                world_size=group_size,
                 backend=backend,
                 group_name=group_name)
             for i, replica in enumerate(self.replicas)
