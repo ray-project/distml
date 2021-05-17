@@ -8,7 +8,6 @@ from distml.operator.jax_operator import JAXTrainingOperator
 from distml.strategy.allreduce_strategy import AllReduceStrategy
 from distml.strategy.ps_strategy import ParameterServerStrategy
 
-
 from ray.util.sgd.utils import override
 
 from jax import random

@@ -1,4 +1,4 @@
-from typing import Tuple, List, Callable, Mapping, Union, Any, Optional, Sequence
+from typing import List, Callable, Mapping, Any, Optional, Sequence, Dict
 import ray
 import ray.util.collective as col
 
@@ -39,8 +39,8 @@ class ParameterServerStrategy(BaseStrategy):
                  world_size: int = 2,
                  num_worker: int = 1,
                  num_ps: int = 1,
-                 backend="nccl",
-                 group_name="default",
+                 backend: str = "nccl",
+                 group_name: str = "default",
                  num_cpus_per_worker: int = 1,
                  num_gpus_per_worker: int = 1,
                  num_cpus_per_server: int = 1,
@@ -103,10 +103,7 @@ class ParameterServerStrategy(BaseStrategy):
             ray.get([server.set_params.remote(this_shard_ref)])
 
     def _start_workers(self):
-        """Start worker group and server group.
-        """
-        # TODO (Hao): infer the per-replica batch size here...
-
+        """Start worker group and server group."""
         # so here we get two set of params that will be passed around:
         # (1) Those for setting up training logic in training_operator,
         # including: batch size, user defined operator_config.
@@ -198,7 +195,16 @@ class ParameterServerStrategy(BaseStrategy):
         print("Load of each ps {}".format(loads))
         self.assignments = assignments
 
-    def train(self, num_steps: Optional[int] = None) -> dict:
+    def train(self, num_steps: Optional[int] = None) -> Dict:
+        """Run the training on parallel workers.
+
+        Args:
+            num_steps (int): number of steps to train. If none, the
+                function will simply train for one epoch.
+
+        Returns:
+            None
+        """
         # TODO (Hao): add fault tolerance using `max_retries`.
         steps = num_steps if num_steps \
             else self.worker_group.get_data_loader_len()
@@ -213,7 +219,14 @@ class ParameterServerStrategy(BaseStrategy):
             print("Step: {}/{}".format(idx, steps))
         return metrics
 
-    def validate(self, num_steps: Optional[int] = None):
+    def validate(self, num_steps: Optional[int] = None) -> Dict:
+        """Evaluates the model on the validation data.
+
+        Args:
+            num_steps (int): number of batches to evaluate. If None, the
+                function will simply validate across the entire validation
+                dataset.
+        """
         steps = num_steps if num_steps \
             else self.worker_group.get_data_loader_len(training=False)
         self.worker_group.make_iterator(training=False)
@@ -224,7 +237,7 @@ class ParameterServerStrategy(BaseStrategy):
         # Validate results should be the same in all workers
         return batch_metrics
 
-    def train_batch(self) -> dict:
+    def train_batch(self) -> Dict:
         loss_vals = []
         rets = []
         metrics = {}
@@ -250,7 +263,8 @@ class ParameterServerStrategy(BaseStrategy):
 
 
 class PS(object):
-    def __init__(self, training_operator_cls, operator_config: Optional[Mapping[str, Any]]):
+    def __init__(self, training_operator_cls,
+                 operator_config: Optional[Mapping[str, Any]]):
         self.training_operator_cls = training_operator_cls
         self.operator_config = operator_config
 
@@ -281,11 +295,11 @@ class PS(object):
 
     def test_connection(self):
         for i in range(self.num_worker):
-            recv = util.zeros((1,), cpu=False)
+            recv = util.zeros((1, ), cpu=False)
             col.recv(recv, i, self.group_name)
             assert recv == 1
         for i in range(self.num_worker):
-            send = util.ones((1,), cpu=False)
+            send = util.ones((1, ), cpu=False)
             col.send(send, i, self.group_name)
         return
 
@@ -368,7 +382,8 @@ class PS(object):
 
 
 class Worker(object):
-    def __init__(self, training_operator_cls, operator_config: Optional[Mapping[str, Any]]):
+    def __init__(self, training_operator_cls,
+                 operator_config: Optional[Mapping[str, Any]]):
         self.training_operator_cls = training_operator_cls
         self.operator_config = operator_config
 
@@ -402,15 +417,15 @@ class Worker(object):
 
     def test_connection(self):
         for i in range(self.num_ps):
-            send = util.ones((1,), cpu=False)
+            send = util.ones((1, ), cpu=False)
             col.send(send, self.num_worker + i, self.group_name)
         for i in range(self.num_ps):
-            recv = util.zeros((1,), cpu=False)
+            recv = util.zeros((1, ), cpu=False)
             col.recv(recv, self.num_worker + i, self.group_name)
             assert recv == 1
         return
 
-    def params_distribution(self):
+    def params_distribution(self) -> List:
         distribution = []
         weights = self.get_named_parameters(cpu=True)
         for k, v in weights.items():
@@ -428,7 +443,7 @@ class Worker(object):
             self.validation_iterator = iter(
                 self.training_operator._get_validation_loader())
 
-    def get_data_loader_len(self, training: bool = True):
+    def get_data_loader_len(self, training: bool = True) -> int:
         """Return the number of batches in the data loader."""
         loader = self.training_operator._get_train_loader() if training \
             else self.training_operator._get_validation_loader()
@@ -439,7 +454,7 @@ class Worker(object):
                 "Data loader has no attribute `__len__`. "
                 "Please set `num_steps` in `train()` or `validate()`.")
 
-    def derive_updates(self, batch: Sequence[Any]):
+    def derive_updates(self, batch: Sequence[Any]) -> Dict:
         # TODO (Hao): handling data loader next.
         return self.training_operator.derive_updates(batch)
 
@@ -463,7 +478,7 @@ class Worker(object):
 
         return loss_val, grads
 
-    def split_gradients(self, grad, assignments):
+    def split_gradients(self, grad, assignments) -> List:
         # assuming messages are gradients or parameters
         # this grad is ready to be called by apply_gradients in ParameterServer
         num_shards = np.unique(np.array(assignments)).size
@@ -472,7 +487,7 @@ class Worker(object):
             shards[assignments[i]][k] = v
         return shards
 
-    def split_parameters(self, assignments):
+    def split_parameters(self, assignments) -> List:
         params = self.get_named_parameters(cpu=False)
         num_shards = np.unique(np.array(assignments)).size
         shards = [dict() for i in range(num_shards)]
@@ -484,12 +499,12 @@ class Worker(object):
         return shards[index]
 
     def set_parameters(self, params):
-        return self.training_operator.set_parameters(params)
+        self.training_operator.set_parameters(params)
 
-    def get_parameters(self, cpu: bool):
+    def get_parameters(self, cpu: bool) -> List:
         return self.training_operator.get_parameters(cpu)
 
-    def get_named_parameters(self, cpu: bool):
+    def get_named_parameters(self, cpu: bool) -> Dict:
         return self.training_operator.get_named_parameters(cpu)
 
     def get_gradients(self):
@@ -564,17 +579,16 @@ class Worker(object):
 class DataParallelGroup(BaseDataParallelGroup):
     """Spawn a actor group for data-parallel training."""
 
-    def __init__(self,
-                 actor_params: Mapping[str, Any],
-                 dist_params: Mapping[str, Any],
-                 num_cpus_per_actor: int,
+    def __init__(self, actor_params: Mapping[str, Any],
+                 dist_params: Mapping[str, Any], num_cpus_per_actor: int,
                  num_gpus_per_actor: int,
                  initialization_hook: Optional[Callable]):
-        super(DataParallelGroup, self).__init__(actor_params=actor_params,
-                                                dist_params=dist_params,
-                                                num_cpus_per_actor=num_cpus_per_actor,
-                                                num_gpus_per_actor=num_gpus_per_actor,
-                                                initialization_hook=initialization_hook)
+        super(DataParallelGroup, self).__init__(
+            actor_params=actor_params,
+            dist_params=dist_params,
+            num_cpus_per_actor=num_cpus_per_actor,
+            num_gpus_per_actor=num_gpus_per_actor,
+            initialization_hook=initialization_hook)
         self.is_server = self._dist_params["is_server"]
         self.num_ps = self._dist_params["num_ps"]
         self.num_worker = self._dist_params["num_worker"]
@@ -595,8 +609,7 @@ class DataParallelGroup(BaseDataParallelGroup):
                     num_worker=num_worker,
                     num_ps=num_ps,
                     backend=backend,
-                    group_name=group_name
-                )
+                    group_name=group_name)
                 for i, actor in enumerate(self._distributed_actors)
             ]
         else:  # this can be extend for allreduce.
@@ -625,8 +638,9 @@ class DataParallelGroup(BaseDataParallelGroup):
         ]
 
         # setup the rank and group in each replica
-        ray.get(self._setup_collective_group(
-            self.num_ps, self.num_worker, self.backend, self.group_name))
+        ray.get(
+            self._setup_collective_group(self.num_ps, self.num_worker,
+                                         self.backend, self.group_name))
 
     def test_connection(self):
         rets = [

@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Mapping, Any, Optional
+from typing import Callable, Mapping, Any, Optional, Dict
 
 import ray
 import ray.util.collective as col
@@ -57,7 +57,7 @@ class AllReduceStrategy(BaseStrategy):
         else:
             self._collector = ThroughputCollection()
 
-    def train(self, num_steps: Optional[int] = None):
+    def train(self, num_steps: Optional[int] = None) -> Dict:
         """Run the training on parallel workers.
 
         Args:
@@ -79,7 +79,7 @@ class AllReduceStrategy(BaseStrategy):
             print("Step: {}/{}".format(idx, steps))
         return metrics
 
-    def validate(self, num_steps: Optional[int] = None):
+    def validate(self, num_steps: Optional[int] = None) -> Dict:
         """Evaluates the model on the validation data.
 
         Args:
@@ -149,7 +149,8 @@ class Replica:
     and Ray collective group setup.
     """
 
-    def __init__(self, training_operator_cls, operator_config: Optional[Mapping[str, Any]]):
+    def __init__(self, training_operator_cls,
+                 operator_config: Optional[Mapping[str, Any]]):
         self.training_operator_cls = training_operator_cls
         self.operator_config = operator_config
         # Training operator
@@ -189,7 +190,7 @@ class Replica:
         else:
             self.validation_iterator = iter(self.validation_loader)
 
-    def get_data_loader_len(self, training: bool = True):
+    def get_data_loader_len(self, training: bool = True) -> int:
         """Return the number of batches in the data loader."""
         loader = self.train_loader if training \
             else self.validation_loader
@@ -200,7 +201,7 @@ class Replica:
                 "Data loader has no attribute `__len__`. "
                 "Please set `num_steps` in `train()` or `validate()`.")
 
-    def train_batch(self) -> dict:
+    def train_batch(self) -> Dict:
         metrics = {}
         try:
             batch = next(self.train_iterator)
@@ -218,7 +219,7 @@ class Replica:
         self.apply_updates(updates)
         return metrics
 
-    def derive_updates(self, batch) -> dict:
+    def derive_updates(self, batch) -> Dict:
         return self.training_operator.derive_updates(batch)
 
     def apply_updates(self, updates):
@@ -277,17 +278,16 @@ class Replica:
 class DataParallelGroup(BaseDataParallelGroup):
     """Spawn a replica group for data-parallel training."""
 
-    def __init__(self,
-                 actor_params: Mapping[str, Any],
-                 dist_params: Mapping[str, Any],
-                 num_cpus_per_actor: int,
+    def __init__(self, actor_params: Mapping[str, Any],
+                 dist_params: Mapping[str, Any], num_cpus_per_actor: int,
                  num_gpus_per_actor: int,
                  initialization_hook: Optional[Callable]):
-        super(DataParallelGroup, self).__init__(actor_params=actor_params,
-                                                dist_params=dist_params,
-                                                num_cpus_per_actor=num_cpus_per_actor,
-                                                num_gpus_per_actor=num_gpus_per_actor,
-                                                initialization_hook=initialization_hook)
+        super(DataParallelGroup, self).__init__(
+            actor_params=actor_params,
+            dist_params=dist_params,
+            num_cpus_per_actor=num_cpus_per_actor,
+            num_gpus_per_actor=num_gpus_per_actor,
+            initialization_hook=initialization_hook)
         self._replicas = None
 
     @property

@@ -1,3 +1,5 @@
+from typing import Any, Mapping, Optional
+
 import numpy as np
 import cupy as cp
 
@@ -14,7 +16,7 @@ from distml.operator.base_operator import TrainingOperator
 
 
 class JAXTrainingOperator(TrainingOperator):
-    def __init__(self, operator_config):
+    def __init__(self, operator_config: Optional[Mapping[str, Any]]):
         super(JAXTrainingOperator, self).__init__(operator_config)
         # Should be set by users in the `register` function.
         # model methods
@@ -64,7 +66,7 @@ class JAXTrainingOperator(TrainingOperator):
         raise NotImplementedError("Please override this function to register "
                                   "your model, optimizer, and criterion.")
 
-    def register(self, *, model, optimizer, criterion, jit_mode=False):
+    def register(self, *, model, optimizer, criterion, jit_mode: bool = False):
         """Register a few critical information about the model to operator.
 
         Args:
@@ -273,7 +275,7 @@ class JAXTrainingOperator(TrainingOperator):
             "samples_num": samples_num
         }
 
-    def get_parameters(self, cpu):
+    def get_parameters(self, cpu: bool):
         """get the flatten parameters."""
         params = self.get_params(self.opt_state)
         flatten_params, tree = tree_flatten(params)
@@ -284,7 +286,7 @@ class JAXTrainingOperator(TrainingOperator):
             flatten_params = list(map(np.asarray, flatten_params))
         return flatten_params
 
-    def get_named_parameters(self, cpu):
+    def get_named_parameters(self, cpu: bool):
         """Get the named parameters.
 
         In jax, we need to construct a dict to contain the parameters.
@@ -335,7 +337,7 @@ class JAXTrainingOperator(TrainingOperator):
                 zip(subtrees, new_subtrees)):
             if new_subtree != subtree:
                 msg = (
-                    "input structur did not match the save params struture. "
+                    "input structure did not match the save params structure. "
                     "input {} and output {}.")
                 raise TypeError(msg.format(subtree, new_subtree))
 
@@ -350,25 +352,25 @@ class JAXTrainingOperator(TrainingOperator):
         self.tree = tree_structure(params)
         self.opt_state = self.opt_init(params)
 
-    def ones(self, shape, cpu=True):
+    def ones(self, shape, cpu: bool = True):
         if cpu:
             return np.ones(shape)
         else:
             return jnp.ones(shape)
 
-    def zeros(self, shape, cpu=True):
+    def zeros(self, shape, cpu: bool = True):
         if cpu:
             return np.zeros(shape)
         else:
             return jnp.zeros(shape)
 
-    def ones_like(self, x, cpu=True):
+    def ones_like(self, x, cpu: bool = True):
         if cpu:
             return np.ones_like(x)
         else:
             return jnp.ones_like(x)
 
-    def zeros_like(self, x, cpu=True):
+    def zeros_like(self, x, cpu: bool = True):
         if cpu:
             return np.zeros_like(x)
         else:
@@ -385,21 +387,21 @@ class JAXTrainingOperator(TrainingOperator):
         del self._validation_loader
 
     # TODO(HUI): use pickle to serialize parameters or states and save it.
-    def save_parameters(self, checkpoint):
+    def save_parameters(self, checkpoint: str):
         raise NotImplementedError(
             "save_parameters is not support in jax operator.")
 
-    def load_parameters(self, checkpoint):
+    def load_parameters(self, checkpoint: str):
         raise NotImplementedError(
             "load_parameters is not support in jax operator.")
 
-    def save_states(self, checkpoint):
+    def save_states(self, checkpoint: str):
         raise NotImplementedError(
             "save_states is not support in jax operator.")
 
     def get_states(self):
         raise NotImplementedError("get_states is not support in jax operator.")
 
-    def load_states(self, checkpoint):
+    def load_states(self, checkpoint: str):
         raise NotImplementedError(
             "load_states is not support in jax operator.")

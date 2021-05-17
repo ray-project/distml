@@ -1,7 +1,7 @@
 from abc import ABCMeta
 from abc import abstractmethod
 import logging
-from typing import AbstractSet, Callable, Any, Mapping, Optional
+from typing import Callable, Any, Mapping, Optional
 
 import ray
 
@@ -88,13 +88,10 @@ class BaseStrategy(metaclass=ABCMeta):
 class BaseDataParallelGroup:
     """Spawn a actor group for data-parallel training."""
 
-    def __init__(self,
-                 actor_params: Mapping[str, Any],
-                 dist_params: Mapping[str, Any],
-                 num_cpus_per_actor: int,
+    def __init__(self, actor_params: Mapping[str, Any],
+                 dist_params: Mapping[str, Any], num_cpus_per_actor: int,
                  num_gpus_per_actor: int,
-                 initialization_hook: Optional[Callable],
-                 **kwargs):
+                 initialization_hook: Optional[Callable], **kwargs):
         self._actor_params = actor_params
         self._dist_params = dist_params
         self._backend = self._dist_params["backend"]
