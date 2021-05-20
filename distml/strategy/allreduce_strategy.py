@@ -7,6 +7,7 @@ from distml.util import ThroughputCollection
 
 import numpy as np
 
+from typing import List, Union, Iterable, Dict
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -248,7 +249,7 @@ class Replica:
 
     def apply(self, fn):
         """Apply a function in the replica process."""
-        return fn()
+        return fn(self)
 
     @property
     def train_loader(self):

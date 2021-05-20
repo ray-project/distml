@@ -191,6 +191,9 @@ class TorchTrainingOperator(TrainingOperator):
             self._lr_scheduler.load_state_dict(states["lr_scheduler"])
         self.load_custom_states(states["custom"])
 
+    def _load_from_checkpoint(self, checkpoint):
+        return torch.load(checkpoint)
+
     def save_states(self, checkpoint):
         """Save the states to a file path."""
         states = self.get_states()
