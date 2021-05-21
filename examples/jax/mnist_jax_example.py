@@ -6,6 +6,7 @@ from filelock import FileLock
 import ray
 from distml.operator.jax_operator import JAXTrainingOperator
 from distml.strategy.allreduce_strategy import AllReduceStrategy
+from distml.strategy.ps_strategy import ParameterServerStrategy
 
 from ray.util.sgd.utils import override
 
@@ -22,6 +23,7 @@ def initialization_hook():
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "False"
+
     # set the below if needed
     # print("NCCL DEBUG SET")
     # os.environ["NCCL_DEBUG"] = "INFO"
@@ -62,7 +64,6 @@ class MnistTrainingOperator(JAXTrainingOperator):
 
         train_images = train_images.reshape(train_images.shape[0], 1, 28,
                                             28).transpose(2, 3, 1, 0)
-
         test_images = test_images.reshape(test_images.shape[0], 1, 28,
                                           28).transpose(2, 3, 1, 0)
 
@@ -83,6 +84,36 @@ class MnistTrainingOperator(JAXTrainingOperator):
             train_loader=train_loader, validation_loader=test_loader)
 
 
+def make_ar_strategy(args):
+    strategy = AllReduceStrategy(
+        training_operator_cls=MnistTrainingOperator,
+        world_size=args.num_worker,
+        operator_config={
+            "lr": 0.01,
+            "batch_size": 128,
+            "num_worker": args.num_worker,
+            "num_classes": 10,
+            "model_name": args.model_name
+        },
+        initialization_hook=initialization_hook)
+    return strategy
+
+
+def make_ps_strategy(args):
+    strategy = ParameterServerStrategy(
+        training_operator_cls=MnistTrainingOperator,
+        world_size=args.num_worker,
+        num_worker=args.num_worker - args.num_ps,
+        num_ps=args.num_ps,
+        operator_config={
+            "lr": 0.01,
+            "batch_size": 128,
+            "num_classes": 10,
+            "model_name": args.model_name
+        })
+    return strategy
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -91,11 +122,16 @@ if __name__ == "__main__":
         type=str,
         help="the address to use for connecting to the Ray cluster")
     parser.add_argument(
-        "--num-workers",
+        "--num-worker",
         "-n",
         type=int,
         default=2,
         help="Sets number of workers for training.")
+    parser.add_argument(
+        "--num-ps",
+        type=int,
+        default=1,
+        help="Sets number of servers for training. Only for ps_strategy.")
     parser.add_argument(
         "--num-epochs",
         type=int,
@@ -111,6 +147,8 @@ if __name__ == "__main__":
         type=str,
         default="resnet18",
         help="model, Optional: resnet18, resnet50, resnet101.")
+    parser.add_argument(
+        "--strategy", type=str, default="ar", help="model, Optional: ar, ps.")
 
     args, _ = parser.parse_known_args()
 
@@ -118,21 +156,17 @@ if __name__ == "__main__":
         ray.init(args.address)
     else:
         ray.init(
-            num_gpus=args.num_workers,
-            num_cpus=args.num_workers * 2,
+            num_gpus=args.num_worker,
+            num_cpus=args.num_worker * 2,
             log_to_driver=True)
 
-    strategy = AllReduceStrategy(
-        training_operator_cls=MnistTrainingOperator,
-        world_size=args.num_workers,
-        operator_config={
-            "lr": 0.01,
-            "batch_size": 128,
-            "num_workers": args.num_workers,
-            "num_classes": 10,
-            "model_name": args.model_name
-        },
-        initialization_hook=initialization_hook)
+    if args.strategy == "ar":
+        strategy = make_ar_strategy(args)
+    elif args.strategy == "ps":
+        strategy = make_ps_strategy(args)
+    else:
+        raise RuntimeError("Unrecognized trainer type. Except 'ar' or 'ps'"
+                           "Got {}".format(args.strategy))
 
     for i in range(args.num_epochs):
         strategy.train()
