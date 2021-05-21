@@ -1,7 +1,5 @@
-import argparse
 import os
 
-import pytest
 from filelock import FileLock
 
 import torch
@@ -15,6 +13,7 @@ from distml.strategy.allreduce_strategy import AllReduceStrategy
 from distml.operator.torch_operator import TorchTrainingOperator
 
 __all__ = ["make_torch_ar_strategy", "make_torch_ps_strategy", "ToyOperator"]
+
 
 def initialization_hook(self):
     # Need this for avoiding a connection restart issue on AWS.

@@ -350,8 +350,12 @@ class JAXTrainingOperator(TrainingOperator):
         self.opt_state = self.opt_init(params)
 
     def clean_redundancy(self):
-        del self._train_loader
-        del self._validation_loader
+        if self._train_loader:
+            del self._train_loader
+            self._train_loader = None
+        if self._validation_loader:
+            del self._validation_loader
+            self._validation_loader = None
 
     # TODO(HUI): use pickle to serialize parameters or states and save it.
     def save_parameters(self, checkpoint):
