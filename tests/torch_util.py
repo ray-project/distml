@@ -20,6 +20,8 @@ def initialization_hook(self):
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"
 
+    os.environ["NCCL_SHM_DISABLE"] = 1
+
     # set the below if needed
     # print("NCCL DEBUG SET")
     # os.environ["NCCL_DEBUG"] = "INFO"

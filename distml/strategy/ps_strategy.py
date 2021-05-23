@@ -467,7 +467,7 @@ class Worker(object):
 
         try:
             batch = next(self.training_iterator)
-        except StopIteration and NameError:
+        except StopIteration or NameError:
             self.make_iterator()
             batch = next(self.training_iterator)
 

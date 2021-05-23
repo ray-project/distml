@@ -299,6 +299,7 @@ class JAXTrainingOperator(TrainingOperator):
             }
         else:
             dict_params = {f"{idx}": p for idx, p in enumerate(params)}
+
         return dict_params
 
     # TODO(HUI): used in load states or load parameters
@@ -311,6 +312,9 @@ class JAXTrainingOperator(TrainingOperator):
             new_params (dict): New parameters to updates the current model.
         """
         assert isinstance(new_params, dict)
+
+        # make sure all params in GPU. Should be controlled of use_gpu.
+        new_params = {k: jax.device_put(v) for k, v in new_params.items()}
 
         keys, new_params = unzip2(
             sorted(new_params.items(), key=lambda d: int(d[0])))

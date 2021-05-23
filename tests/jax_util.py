@@ -24,6 +24,8 @@ def initialization_hook(self):
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"
 
+    os.environ["NCCL_SHM_DISABLE"] = "1"
+
     # set the below if needed
     # print("NCCL DEBUG SET")
     # os.environ["NCCL_DEBUG"] = "INFO"
@@ -62,6 +64,7 @@ class ToyOperator(JAXTrainingOperator):
             train_images, train_labels, test_images, test_labels = mnist()
 
         if config.get("test_mode", False):
+            np.random.seed(556)
             rng = np.random.randint(low=0, high=len(test_images), size=64)
             train_images = train_images[rng, ...]
             train_labels = train_labels[rng, ...]

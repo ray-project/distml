@@ -82,9 +82,11 @@ class Test_jax_operator:
         states_3 = operator.get_states()
 
         for key in states["model"].keys():
-            assert np.allclose(
-                states["model"][key].cpu(), states_3["model"][key].cpu(),
-                atol=0.01, rtol=0.1)
+            self._assert_allclose(states["model"][key].cpu(),
+                                  states_3["model"][key].cpu())
+
+    def _assert_allclose(self, p, q):
+        assert np.allclose(p, q, atol=0.01, rtol=0.1)
 
     @pytest.mark.parametrize("array_shape",
                              [(1,), (3, 3), (1, 1, 1), (3, 3, 3), (3, 3, 3, 3)])

@@ -1,8 +1,10 @@
 import logging
+from collections import defaultdict
 from typing import Callable, Mapping, Any, Optional, Dict
 
 import ray
 import ray.util.collective as col
+from ray.util.sgd.utils import AverageMeterCollection
 from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
 from distml.util import ThroughputCollection
 
@@ -58,6 +60,8 @@ class AllReduceStrategy(BaseStrategy):
         else:
             self._collector = ThroughputCollection()
 
+        self._init_strategy()
+
     def train(self, num_steps: Optional[int] = None) -> Dict:
         """Run the training on parallel workers.
 
@@ -76,9 +80,9 @@ class AllReduceStrategy(BaseStrategy):
         self.data_parallel_group.make_iterator()
         for idx in range(steps):
             with self._collector.record("train"):
-                metrics = self.data_parallel_group.train_batch()
+                metric = self.data_parallel_group.train_batch()
             print("Step: {}/{}".format(idx, steps))
-        return metrics
+        return metric
 
     def validate(self, num_steps: Optional[int] = None) -> Dict:
         """Evaluates the model on the validation data.
@@ -90,15 +94,27 @@ class AllReduceStrategy(BaseStrategy):
         """
         steps = num_steps if num_steps \
             else self.data_parallel_group.get_data_loader_len(training=False)
+        metrics = [AverageMeterCollection() for _ in range(len(self.data_parallel_group.replicas))]
+
         self.data_parallel_group.make_iterator(training=False)
         for idx in range(steps):
             with self._collector.record("validate"):
                 batch_metrics = self.data_parallel_group.validate_batch()
+            for metric_idx, metric in enumerate(batch_metrics):
+                samples_num = metric.pop("samples_num")
+                metrics[metric_idx].update(metric, n=samples_num)
         self._collector.update(
             "validate", val_acc=batch_metrics[0]["val_loss"])
         self._collector.save("validate")
         # TODO: validate result should be the same in all workers
-        return batch_metrics
+        return metrics[0].summary()
+
+    def _init_strategy(self):
+        """Do initialization for the distributed strategy."""
+        # All sync with replica 0
+        init_weights = self.data_parallel_group.get_named_parameters(cpu=True)
+        # all replicas get synced
+        self.data_parallel_group.set_parameters(init_weights)
 
     def _start_workers(self):
         """Create distributed workers on the Ray cluster for distributed training.
@@ -138,9 +154,6 @@ class AllReduceStrategy(BaseStrategy):
 
     def load_parameters(self, checkpoint: str):
         self.data_parallel_group.load_parameters(checkpoint)
-
-    def _init_strategy(self):
-        pass
 
 
 class Replica:
@@ -206,7 +219,7 @@ class Replica:
         metrics = {}
         try:
             batch = next(self.train_iterator)
-        except StopIteration and NameError:
+        except StopIteration or NameError:
             self.make_iterator()
             batch = next(self.train_iterator)
         loss_val, updates = self.derive_updates(batch)
@@ -232,7 +245,7 @@ class Replica:
     def validate_batch(self):
         try:
             batch = next(self.validation_iterator)
-        except StopIteration and NameError:
+        except StopIteration or NameError:
             self.make_iterator(training=False)
             batch = next(self.validation_iterator)
         batch_metric = self.training_operator.validate_batch(batch)
@@ -244,6 +257,15 @@ class Replica:
         if self.training_operator:
             del self.training_operator
         return 1
+
+    def get_parameters(self, cpu: bool) -> List:
+        return self.training_operator.get_parameters(cpu)
+
+    def get_named_parameters(self, cpu: bool) -> Dict:
+        return self.training_operator.get_named_parameters(cpu)
+
+    def set_parameters(self, params):
+        self.training_operator.set_parameters(params)
 
     def save_parameters(self, checkpoint: str):
         self.training_operator.save_parameters(checkpoint)
@@ -289,7 +311,6 @@ class DataParallelGroup(BaseDataParallelGroup):
             num_cpus_per_actor=num_cpus_per_actor,
             num_gpus_per_actor=num_gpus_per_actor,
             initialization_hook=initialization_hook)
-        self._replicas = None
 
     @property
     def _replica_params(self):
@@ -396,6 +417,8 @@ class DataParallelGroup(BaseDataParallelGroup):
     def get_named_parameters(self, cpu: bool = False):
         ret = self.replicas[0].get_named_parameters.remote(cpu)
         return ray.get([ret])[0]
+        # rets = [replica.get_named_parameters.remote(cpu) for replica in self.replicas]
+        # return ray.get(rets)[0]
 
     def apply_all_replicas(self, fn: Callable):
         """Apply fn in all replica processes and wait until completion."""
