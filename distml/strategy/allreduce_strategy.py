@@ -228,7 +228,7 @@ class Replica:
         metrics["train_loss"] = loss_val
         for _, g in updates.items():
             cg = self.training_operator.to_cupy(g)
-            col.allreduce(cg)
+            col.allreduce(cg, self.group_name)
             cg = cg / float(self.world_size)
         self.apply_updates(updates)
         return metrics

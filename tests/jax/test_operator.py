@@ -49,17 +49,18 @@ class Test_jax_operator:
         assert isinstance(loss_val, float)
         assert isinstance(grads, dict)
 
-        with pytest.raises(NotImplementedError):
-            assert len(grads) == \
-                   len(operator.get_states()["model"])
+        # with pytest.raises(NotImplementedError):
+        assert len(grads) == \
+               len(operator.get_parameters(cpu=True))
 
         operator.apply_updates(grads)
 
-    def tmp_test_states(self):
+    def test_states(self):
         operator = self.operator
         states = operator.get_states()
+        params = operator.get_parameters(cpu=True)
 
-        tmp_state_path = "tmp_states.pth"
+        tmp_state_path = "tmp_states.pkl"
         operator.save_states(tmp_state_path)
 
         def train_batch():
@@ -71,19 +72,21 @@ class Test_jax_operator:
         train_batch()
         operator.load_states(checkpoint=tmp_state_path)
         states_2 = operator.get_states()
+        params_2 = operator.get_parameters(cpu=True)
 
-        for key in states["model"].keys():
-            assert np.allclose(
-                states["model"][key].cpu(), states_2["model"][key].cpu(),
-                atol=0.01, rtol=0.1)
+        for idx in range(len(params)):
+            self._assert_allclose(
+                params[idx], params_2[idx])
 
         train_batch()
         operator.load_states(states=states)
         states_3 = operator.get_states()
+        params_3 = operator.get_parameters(cpu=True)
 
-        for key in states["model"].keys():
-            self._assert_allclose(states["model"][key].cpu(),
-                                  states_3["model"][key].cpu())
+        for idx in range(len(params)):
+            self._assert_allclose(
+                params[idx], params_3[idx])
+
 
     def _assert_allclose(self, p, q):
         assert np.allclose(p, q, atol=0.01, rtol=0.1)
@@ -122,6 +125,7 @@ class Test_jax_operator:
 
         assert not operator._train_loader
         assert not operator._validation_loader
+
 
 if __name__ == "__main__":
     import pytest

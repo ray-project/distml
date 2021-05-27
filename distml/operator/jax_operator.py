@@ -1,3 +1,4 @@
+import pickle
 from typing import Any, Mapping, Optional
 
 import numpy as np
@@ -29,10 +30,13 @@ class JAXTrainingOperator(TrainingOperator):
         self.get_params = None
 
         self.criterion = None
+        self.lr_scheduler = None
 
         # Data loaders for training and validation, registered by users.
         self._train_loader = None
         self._validation_loader = None
+
+        self._custom_states = None
 
         self.setup(operator_config)
 
@@ -403,13 +407,53 @@ class JAXTrainingOperator(TrainingOperator):
         raise NotImplementedError(
             "load_parameters is not support in jax operator.")
 
-    def save_states(self, checkpoint: str):
-        raise NotImplementedError(
-            "save_states is not support in jax operator.")
+    def register_custom_states(self, custom_states):
+        self._custom_states = custom_states
+
+    def get_custom_states(self):
+        return self._custom_states
 
     def get_states(self):
-        raise NotImplementedError("get_states is not support in jax operator.")
+        """Return the states of this training operator."""
 
-    def load_states(self, checkpoint: str):
-        raise NotImplementedError(
-            "load_states is not support in jax operator.")
+        states_flat, tree, subtrees = self.opt_state
+        states = {
+            "opt_state": states_flat,
+        }
+
+        if self._custom_states:
+            states.update({"custom": self.get_custom_states()})
+
+        if self.lr_scheduler and hasattr(self.lr_scheduler, "get_state_dict()"):
+            states.update({"lr_scheduler": self.lr_scheduler.get_state_dict()})
+        return states
+
+        # raise NotImplementedError("get_states is not support in jax operator.")
+
+    def save_states(self, checkpoint: str):
+        states = self.get_states()
+        with open(checkpoint, "wb") as f:
+            pickle.dump(states, f)
+        # raise NotImplementedError(
+        #     "save_states is not support in jax operator.")
+
+    def load_states(self,
+                    states=None,
+                    checkpoint: Optional[str] = None):
+        if checkpoint:
+            with open(checkpoint, "rb") as f:
+                states = pickle.load(f)
+
+        state_flat = states.pop("opt_state", None)
+        custom_states = states.pop("custom_states", None)
+
+        if state_flat:
+            self.opt_state = state_flat, *self.opt_state[1:]
+        else:
+            raise RuntimeError("This checkpoint doesn't have `opt_state` key.")
+
+        if custom_states:
+            self._custom_states.update(custom_states)
+
+        # raise NotImplementedError(
+        #     "load_states is not support in jax operator.")

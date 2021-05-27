@@ -7,7 +7,7 @@ import ray
 from ray.util.collective.types import Backend
 from ray.util.collective.tests.conftest import clean_up
 
-from tests.jax_util import make_jax_ar_strategy
+from tests.jax_util import make_jax_ar_strategy, ToyOperator
 
 import jax
 import jax.numpy as jnp
@@ -26,6 +26,7 @@ class Test_allreduce_strategy_single_node_2workers:
 
     def teardown_class(self):
         del self.strategy
+        ray.shutdown()
         # os.system("ray stop")
 
     def test_init_strategy(self):
@@ -82,6 +83,26 @@ class Test_allreduce_strategy_single_node_2workers:
                 assert metrics[i]._meters[key].avg - \
                        metrics[i+1]._meters[key].avg < 1e-4
 
+
+class Test_allreduce_strategy_single_node_multi_task:
+    def setup_class(self):
+        ray.init(num_gpus=8,
+                 num_cpus=16)
+
+    def teardown_class(self):
+        ray.shutdown()
+
+    # @pytest.mark.parametrize("num_task", [2,3,4])
+    # def test_multi_task(self, num_task):
+    #     """Just try to create multi-task.
+    #     Can not run multi-task asynchronous."""
+    #     strategy_list = []
+    #     for i in range(num_task):
+    #         strategy = make_jax_ar_strategy(group_name=f"task{i}")
+    #         strategy_list.append(strategy)
+    #
+    #     for i in range(num_task):
+    #         strategy_list[i].train()
 
 if __name__ == "__main__":
     import pytest

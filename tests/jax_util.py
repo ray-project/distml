@@ -16,6 +16,7 @@ from distml.strategy.allreduce_strategy import AllReduceStrategy
 from distml.operator.jax_operator import JAXTrainingOperator
 
 from examples.jax.jax_util.datasets import mnist, Dataloader
+
 __all__ = ["make_jax_ar_strategy", "make_jax_ps_strategy", "ToyOperator"]
 
 
@@ -94,11 +95,15 @@ class ToyOperator(JAXTrainingOperator):
             train_loader=train_loader, validation_loader=test_loader)
 
 
-def make_jax_ar_strategy(world_size=2):
+def make_jax_ar_strategy(world_size=2,
+                         backend="nccl",
+                         group_name="default"):
     strategy = AllReduceStrategy(
         training_operator_cls=ToyOperator,
         initialization_hook=initialization_hook,
         world_size=world_size,
+        backend=backend,
+        group_name=group_name,
         operator_config={
             "lr": 0.01,
             "test_mode": True,  # subset the data
@@ -107,14 +112,15 @@ def make_jax_ar_strategy(world_size=2):
         })
 
     return strategy
+
 
 def make_jax_ps_strategy(num_ps=2, num_worker=2):
     strategy = ParameterServerStrategy(
         training_operator_cls=ToyOperator,
         initialization_hook=initialization_hook,
         world_size=num_ps + num_worker,
-        num_ps = num_ps,
-        num_worker = num_worker,
+        num_ps=num_ps,
+        num_worker=num_worker,
         operator_config={
             "lr": 0.01,
             "test_mode": True,  # subset the data
@@ -123,7 +129,6 @@ def make_jax_ps_strategy(num_ps=2, num_worker=2):
         })
 
     return strategy
-
 
 # class Worker(object):
 #     def __init__(self):
@@ -143,16 +148,16 @@ def make_jax_ps_strategy(num_ps=2, num_worker=2):
 #
 #         self.strategy = strategy
 
-    # def setup_ps_strategy(self):
-    #     strategy = ParameterServerStrategy(
-    #         training_operator_cls=ToyOperator,
-    #         initialization_hook=initialization_hook,
-    #         world_size=2,
-    #         operator_config={
-    #             "lr": 0.01,
-    #             "test_mode": True,  # subset the data
-    #             # this will be split across workers.
-    #             "batch_size": 16
-    #         })
-    #
-    #     self.strategy = strategy
+# def setup_ps_strategy(self):
+#     strategy = ParameterServerStrategy(
+#         training_operator_cls=ToyOperator,
+#         initialization_hook=initialization_hook,
+#         world_size=2,
+#         operator_config={
+#             "lr": 0.01,
+#             "test_mode": True,  # subset the data
+#             # this will be split across workers.
+#             "batch_size": 16
+#         })
+#
+#     self.strategy = strategy
