@@ -1,5 +1,6 @@
 import pickle
-from typing import Any, Mapping, Optional
+import warnings
+from typing import Any, Mapping, Optional, List, Dict
 
 import numpy as np
 import cupy as cp
@@ -279,7 +280,7 @@ class JAXTrainingOperator(TrainingOperator):
             "samples_num": samples_num
         }
 
-    def get_parameters(self, cpu: bool):
+    def get_parameters(self, cpu: bool) -> List:
         """get the flatten parameters."""
         params = self.get_params(self.opt_state)
         flatten_params, tree = tree_flatten(params)
@@ -290,7 +291,7 @@ class JAXTrainingOperator(TrainingOperator):
             flatten_params = list(map(np.asarray, flatten_params))
         return flatten_params
 
-    def get_named_parameters(self, cpu: bool):
+    def get_named_parameters(self, cpu: bool) -> Dict:
         """Get the named parameters.
 
         In jax, we need to construct a dict to contain the parameters.
@@ -350,6 +351,8 @@ class JAXTrainingOperator(TrainingOperator):
                 raise TypeError(msg.format(subtree, new_subtree))
 
         self.opt_state = OptimizerState(new_states_flat, tree, new_subtrees)
+
+        print(self.get_params(self.opt_state))
 
     def reset_optimizer_for_params(self, params):
         if not isinstance(params, dict):
@@ -413,12 +416,15 @@ class JAXTrainingOperator(TrainingOperator):
     def get_custom_states(self):
         return self._custom_states
 
-    def get_states(self):
+    def get_states(self) -> Dict:
         """Return the states of this training operator."""
 
         states_flat, tree, subtrees = self.opt_state
+
+        states = map(tree_unflatten, subtrees, states_flat)
+
         states = {
-            "opt_state": states_flat,
+            "opt_state": list(states),
         }
 
         if self._custom_states:
@@ -426,34 +432,54 @@ class JAXTrainingOperator(TrainingOperator):
 
         if self.lr_scheduler and hasattr(self.lr_scheduler, "get_state_dict()"):
             states.update({"lr_scheduler": self.lr_scheduler.get_state_dict()})
-        return states
 
-        # raise NotImplementedError("get_states is not support in jax operator.")
+        return states
 
     def save_states(self, checkpoint: str):
         states = self.get_states()
         with open(checkpoint, "wb") as f:
             pickle.dump(states, f)
-        # raise NotImplementedError(
-        #     "save_states is not support in jax operator.")
 
     def load_states(self,
                     states=None,
                     checkpoint: Optional[str] = None):
         if checkpoint:
+            assert ".pkl" in checkpoint, "checkpoint should be a .pkl file. Got {}".format(checkpoint)
             with open(checkpoint, "rb") as f:
                 states = pickle.load(f)
 
-        state_flat = states.pop("opt_state", None)
-        custom_states = states.pop("custom_states", None)
+        if states:
+            tmp_opt_states = states.pop("opt_state", None)
+            custom_states = states.pop("custom_states", None)
+            lr_scheduler_states = states.pop("lr_scheduler", None)
 
-        if state_flat:
-            self.opt_state = state_flat, *self.opt_state[1:]
+            if not tmp_opt_states:
+                raise RuntimeError("subtrees of new params is empty.")
+
+            states_flat, tree, subtrees = self.opt_state
+            states_flat_2, subtrees_2 = unzip2(map(tree_flatten, tmp_opt_states))
+
+            if not subtrees_2:
+                raise RuntimeError("subtrees of new params is empty.")
+            for idx, (subtree, subtree_2) in enumerate(
+                    zip(subtrees, subtrees_2)):
+                if subtree_2 != subtree:
+                    msg = (
+                        "input structure did not match the save params structure. "
+                        "input {} and output {}.")
+                    raise TypeError(msg.format(subtree, subtree_2))
+
+            self.opt_state = OptimizerState(states_flat_2, tree, subtrees_2)
+
+            if custom_states:
+                self._custom_states.update(custom_states)
+
+            if lr_scheduler_states:
+                if hasattr(self.lr_scheduler, "set_states_dict"):
+                    self.lr_scheduler.set_states_dict(lr_scheduler_states)
+                else:
+                    warnings.warn("lr scheduler must have `set_states_dict` method"
+                                  " to support loading lr scheduler states.")
         else:
             raise RuntimeError("This checkpoint doesn't have `opt_state` key.")
 
-        if custom_states:
-            self._custom_states.update(custom_states)
-
-        # raise NotImplementedError(
-        #     "load_states is not support in jax operator.")

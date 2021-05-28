@@ -1,4 +1,6 @@
 """Test the send/recv API."""
+import copy
+
 import pytest
 import cupy as cp
 import numpy as np
@@ -7,6 +9,9 @@ import jax
 import jax.numpy as jnp
 
 from tests.jax_util import ToyOperator
+from jax.tree_util import tree_flatten, tree_unflatten, tree_structure
+from jax._src.util import unzip2
+from jax.experimental.optimizers import OptimizerState
 
 
 class Test_jax_operator:
@@ -49,7 +54,6 @@ class Test_jax_operator:
         assert isinstance(loss_val, float)
         assert isinstance(grads, dict)
 
-        # with pytest.raises(NotImplementedError):
         assert len(grads) == \
                len(operator.get_parameters(cpu=True))
 
@@ -58,20 +62,40 @@ class Test_jax_operator:
     def test_states(self):
         operator = self.operator
         states = operator.get_states()
+        states = copy.deepcopy(states)
         params = operator.get_parameters(cpu=True)
+        params = copy.deepcopy(params)
+
+        states_flat, tree, subtrees = operator.opt_state
+        new_states_flat, new_subtrees = unzip2(map(tree_flatten, states["opt_state"]))
+        new_opt_state = OptimizerState(new_states_flat, tree, new_subtrees)
+        params_1 = operator.get_params(new_opt_state)
+        params_1, _ = tree_flatten(params_1)
+
+        for idx in range(len(params)):
+            self._assert_allclose(
+                params[idx], params_1[idx])
 
         tmp_state_path = "tmp_states.pkl"
         operator.save_states(tmp_state_path)
+        iterator = iter(operator._train_loader)
 
         def train_batch():
-            iterator = iter(operator._train_loader)
             batch = next(iterator)
             loss_val, grads = operator.derive_updates(batch)
             operator.apply_updates(grads)
 
         train_batch()
+        batch = next(iterator)
+        loss_val, grads = operator.derive_updates(batch)
+        operator.apply_updates(grads)
+
+        with pytest.raises(AssertionError):
+            params_2 = operator.get_parameters(cpu=True)
+            self._assert_allclose(
+                params[0], params_2[0])
+
         operator.load_states(checkpoint=tmp_state_path)
-        states_2 = operator.get_states()
         params_2 = operator.get_parameters(cpu=True)
 
         for idx in range(len(params)):
@@ -80,16 +104,11 @@ class Test_jax_operator:
 
         train_batch()
         operator.load_states(states=states)
-        states_3 = operator.get_states()
         params_3 = operator.get_parameters(cpu=True)
 
         for idx in range(len(params)):
             self._assert_allclose(
                 params[idx], params_3[idx])
-
-
-    def _assert_allclose(self, p, q):
-        assert np.allclose(p, q, atol=0.01, rtol=0.1)
 
     @pytest.mark.parametrize("array_shape",
                              [(1,), (3, 3), (1, 1, 1), (3, 3, 3), (3, 3, 3, 3)])
@@ -126,9 +145,20 @@ class Test_jax_operator:
         assert not operator._train_loader
         assert not operator._validation_loader
 
+    def _assert_shape(self, p, q):
+        shape1 = p.shape
+        shape2 = q.shape
+
+        assert shape1 == shape2, "Input {} and {} have different shape." \
+                                 "Got {} and {}.".format(p, q, shape1, shape2)
+
+    def _assert_allclose(self, p, q):
+        self._assert_shape(p, q)
+        assert jnp.allclose(p, q)
+
 
 if __name__ == "__main__":
     import pytest
     import sys
 
-    sys.exit(pytest.main(["-v", "-x", __file__]))
+    sys.exit(pytest.main(["-v", "-x", "-s", __file__]))

@@ -498,6 +498,9 @@ class Worker(object):
     def index_shard(self, shards, index: int):
         return shards[index]
 
+    def recv_params_from(self, idx):
+        return shards[index]
+
     def set_parameters(self, params):
         self.training_operator.set_parameters(params)
 
