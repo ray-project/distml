@@ -240,7 +240,6 @@ class ParameterServerStrategy(BaseStrategy):
                 server.send_params.remote(worker_idx)
             # the worker receives shards from ps, compute loss, gradients
             # and sends these gradients to every server
-            # loss_val = worker.compute.remote()
             ret = worker.recv_params.remote()
             rets.append(ret)
         ray.get(rets)
@@ -587,36 +586,10 @@ class Worker(object):
 
         self.recv_params()
 
-        # weights = self.get_named_parameters(cpu=False)
-        # params = dict()
-        #
-        # # 1. Create the receive lists to group collective calls
-        # recv_list = []
-        # for i in range(self.num_ps):
-        #     recv_list.append([])
-        #     param_shard_keys = self.name_list[i]
-        #     for key in param_shard_keys:
-        #         to_recv = weights[key]
-        #         recv_list[-1].append(
-        #             self.training_operator.ones(to_recv.shape, cpu=False))
-        #
-        # # 2. Receive params from servers
-        # for i in range(self.num_ps):
-        #     for j in range(len(self.name_list[i])):
-        #         v = self.training_operator.to_cupy(recv_list[i][j])
-        #         col.recv(v, self.num_worker + i, self.group_name)
-        #
-        # # 3. Set params in workers and compute gradients.
-        # for i in range(self.num_ps):
-        #     param_shard_keys = self.name_list[i]
-        #     for j in range(len(param_shard_keys)):
-        #         params[param_shard_keys[j]] = recv_list[i][j]
-
         loss_val, grad = self.compute_gradients()
-        # loss_val, grad = self.compute_gradients(params)
         metrics["train_loss"] = loss_val
 
-        # 4. Shard gradients and send to servers.
+        # Shard gradients and send to servers.
         split_grad = self.split_gradients(grad, self.assignments)
         for i in range(self.num_ps):
             this_shard = self.index_shard(split_grad, i)
