@@ -352,8 +352,6 @@ class JAXTrainingOperator(TrainingOperator):
 
         self.opt_state = OptimizerState(new_states_flat, tree, new_subtrees)
 
-        print(self.get_params(self.opt_state))
-
     def reset_optimizer_for_params(self, params):
         if not isinstance(params, dict):
             raise RuntimeError("The `params` should be dict. "

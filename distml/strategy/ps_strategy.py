@@ -1,14 +1,15 @@
+import logging
 from typing import List, Callable, Mapping, Any, Optional, Sequence, Dict
+
 import ray
 import ray.util.collective as col
+from ray.util.sgd.utils import AverageMeterCollection
 
 import numpy as np
 
 import distml.util as util
 from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
 from distml.util import ThroughputCollection
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -231,11 +232,29 @@ class ParameterServerStrategy(BaseStrategy):
             else self.worker_group.get_data_loader_len(training=False)
         self.worker_group.make_iterator(training=False)
 
+        # Worker group pull latest params.
+        rets = []
+        for worker_idx, worker in enumerate(self.worker_group.actors):
+            for server_idx, server in enumerate(self.server_group.actors):
+                # every server sends its shard to the worker
+                server.send_params.remote(worker_idx)
+            # the worker receives shards from ps, compute loss, gradients
+            # and sends these gradients to every server
+            # loss_val = worker.compute.remote()
+            ret = worker.recv_params.remote()
+            rets.append(ret)
+        ray.get(rets)
+
+        metrics = [AverageMeterCollection() for _ in range(len(self.worker_group.actors))]
+
         # TODO(HUI): Construct a better tool to save validate results.
         for idx in range(steps):
             batch_metrics = self.worker_group.validate_batch()
+            for metric_idx, metric in enumerate(batch_metrics):
+                samples_num = metric.pop("samples_num")
+                metrics[metric_idx].update(metric, n=samples_num)
         # Validate results should be the same in all workers
-        return batch_metrics
+        return metrics[0].summary()
 
     def train_batch(self) -> Dict:
         loss_vals = []
@@ -293,14 +312,20 @@ class PS(object):
         col.init_collective_group(
             num_ps + num_worker, rank, backend=backend, group_name=group_name)
 
+    def apply(self, fn: Callable):
+        """Apply a function in the replica process."""
+        return fn(self)
+
     def test_connection(self):
         for i in range(self.num_worker):
-            recv = util.zeros((1, ), cpu=False)
-            col.recv(recv, i, self.group_name)
+            recv = util.zeros((1,), cpu=False)
+            col.recv(recv, i,
+                     group_name=self.group_name)
             assert recv == 1
         for i in range(self.num_worker):
-            send = util.ones((1, ), cpu=False)
-            col.send(send, i, self.group_name)
+            send = util.ones((1,), cpu=False)
+            col.send(send, i,
+                     group_name=self.group_name)
         return
 
     def _init_grad_counts(self):
@@ -338,7 +363,8 @@ class PS(object):
         """ Send this param shard to the destination worker """
         for name, v in self.params.items():
             cv = self.training_operator.to_cupy(v)
-            col.send(cv, dst_rank, self.group_name)
+            col.send(cv, dst_rank,
+                     group_name=self.group_name)
 
     def update(self, src_rank: int):
         """Receive gradients and update"""
@@ -415,13 +441,19 @@ class Worker(object):
         col.init_collective_group(
             num_ps + num_worker, rank, backend=backend, group_name=group_name)
 
+    def apply(self, fn: Callable):
+        """Apply a function in the replica process."""
+        return fn(self)
+
     def test_connection(self):
         for i in range(self.num_ps):
-            send = util.ones((1, ), cpu=False)
-            col.send(send, self.num_worker + i, self.group_name)
+            send = util.ones((1,), cpu=False)
+            col.send(send, self.num_worker + i,
+                     group_name=self.group_name)
         for i in range(self.num_ps):
-            recv = util.zeros((1, ), cpu=False)
-            col.recv(recv, self.num_worker + i, self.group_name)
+            recv = util.zeros((1,), cpu=False)
+            col.recv(recv, self.num_worker + i,
+                     group_name=self.group_name)
             assert recv == 1
         return
 
@@ -458,12 +490,14 @@ class Worker(object):
         # TODO (Hao): handling data loader next.
         return self.training_operator.derive_updates(batch)
 
-    def compute_gradients(self, params):
+    # def compute_gradients(self, params):
+    def compute_gradients(self):
+
         """
         Update worker parameters that received from server.
         Compute gradients and return named gradients.
         """
-        self.set_parameters(params)
+        # self.set_parameters(params)
 
         try:
             batch = next(self.training_iterator)
@@ -498,8 +532,34 @@ class Worker(object):
     def index_shard(self, shards, index: int):
         return shards[index]
 
-    def recv_params_from(self, idx):
-        return shards[index]
+    def recv_params(self):
+        weights = self.get_named_parameters(cpu=False)
+        params = dict()
+
+        # 1. Create the receive lists to group collective calls
+        recv_list = []
+        for i in range(self.num_ps):
+            recv_list.append([])
+            param_shard_keys = self.name_list[i]
+            for key in param_shard_keys:
+                to_recv = weights[key]
+                recv_list[-1].append(
+                    self.training_operator.ones(to_recv.shape, cpu=False))
+
+        # 2. Receive params from servers
+        for i in range(self.num_ps):
+            for j in range(len(self.name_list[i])):
+                v = self.training_operator.to_cupy(recv_list[i][j])
+                col.recv(v, self.num_worker + i,
+                         group_name=self.group_name)
+
+        # 3. Set params in workers.
+        for i in range(self.num_ps):
+            param_shard_keys = self.name_list[i]
+            for j in range(len(param_shard_keys)):
+                params[param_shard_keys[j]] = recv_list[i][j]
+
+        self.set_parameters(params)
 
     def set_parameters(self, params):
         self.training_operator.set_parameters(params)
@@ -525,32 +585,35 @@ class Worker(object):
         """Returns the loss, and send gradients to servers"""
         metrics = {}
 
-        weights = self.get_named_parameters(cpu=False)
-        params = dict()
+        self.recv_params()
 
-        # 1. Create the receive lists to group collective calls
-        recv_list = []
-        for i in range(self.num_ps):
-            recv_list.append([])
-            param_shard_keys = self.name_list[i]
-            for key in param_shard_keys:
-                to_recv = weights[key]
-                recv_list[-1].append(
-                    self.training_operator.ones(to_recv.shape, cpu=False))
+        # weights = self.get_named_parameters(cpu=False)
+        # params = dict()
+        #
+        # # 1. Create the receive lists to group collective calls
+        # recv_list = []
+        # for i in range(self.num_ps):
+        #     recv_list.append([])
+        #     param_shard_keys = self.name_list[i]
+        #     for key in param_shard_keys:
+        #         to_recv = weights[key]
+        #         recv_list[-1].append(
+        #             self.training_operator.ones(to_recv.shape, cpu=False))
+        #
+        # # 2. Receive params from servers
+        # for i in range(self.num_ps):
+        #     for j in range(len(self.name_list[i])):
+        #         v = self.training_operator.to_cupy(recv_list[i][j])
+        #         col.recv(v, self.num_worker + i, self.group_name)
+        #
+        # # 3. Set params in workers and compute gradients.
+        # for i in range(self.num_ps):
+        #     param_shard_keys = self.name_list[i]
+        #     for j in range(len(param_shard_keys)):
+        #         params[param_shard_keys[j]] = recv_list[i][j]
 
-        # 2. Receive params from servers
-        for i in range(self.num_ps):
-            for j in range(len(self.name_list[i])):
-                v = self.training_operator.to_cupy(recv_list[i][j])
-                col.recv(v, self.num_worker + i, self.group_name)
-
-        # 3. Set params in workers and compute gradients.
-        for i in range(self.num_ps):
-            param_shard_keys = self.name_list[i]
-            for j in range(len(param_shard_keys)):
-                params[param_shard_keys[j]] = recv_list[i][j]
-
-        loss_val, grad = self.compute_gradients(params)
+        loss_val, grad = self.compute_gradients()
+        # loss_val, grad = self.compute_gradients(params)
         metrics["train_loss"] = loss_val
 
         # 4. Shard gradients and send to servers.
@@ -559,7 +622,8 @@ class Worker(object):
             this_shard = self.index_shard(split_grad, i)
             for _, v in this_shard.items():
                 cv = self.training_operator.to_cupy(v)
-                col.send(cv, self.num_worker + i, self.group_name)
+                col.send(cv, self.num_worker + i,
+                         group_name=self.group_name)
         return metrics
 
     def validate_batch(self):
@@ -640,6 +704,10 @@ class DataParallelGroup(BaseDataParallelGroup):
             RemoteActor.remote(**self._actor_params) for _ in range(num_actors)
         ]
 
+        # apply init_hook
+        if self._initialization_hook:
+            self.apply_all_replicas(self._initialization_hook)
+
         # setup the rank and group in each replica
         ray.get(
             self._setup_collective_group(self.num_ps, self.num_worker,
@@ -658,6 +726,14 @@ class DataParallelGroup(BaseDataParallelGroup):
             for _, actor in enumerate(self.actors)
         ]
         return rets
+
+    def apply_all_replicas(self, fn: Callable):
+        """Apply fn in all replica processes and wait until completion."""
+        return ray.get(self._apply_all_replicas(fn))
+
+    def _apply_all_replicas(self, fn):
+        """Apply a function fn in all replica processes."""
+        return [actor.apply.remote(fn) for actor in self.actors]
 
     def _make_iterator(self, training: bool):
         return [actor.make_iterator.remote(training) for actor in self.actors]

@@ -13,6 +13,7 @@ import jax.numpy as jnp
 
 from distml.util import override
 from distml.strategy.allreduce_strategy import AllReduceStrategy
+from distml.strategy.ps_strategy import ParameterServerStrategy
 from distml.operator.jax_operator import JAXTrainingOperator
 
 from examples.jax.jax_util.datasets import mnist, Dataloader

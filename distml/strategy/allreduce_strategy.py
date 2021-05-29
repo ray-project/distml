@@ -1,16 +1,15 @@
 import logging
-from collections import defaultdict
-from typing import Callable, Mapping, Any, Optional, Dict
+from typing import List, Callable, Mapping, Any, Optional, Dict
 
 import ray
 import ray.util.collective as col
 from ray.util.sgd.utils import AverageMeterCollection
-from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
-from distml.util import ThroughputCollection
 
 import numpy as np
 
-from typing import List, Union, Iterable, Dict
+from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
+from distml.util import ThroughputCollection
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

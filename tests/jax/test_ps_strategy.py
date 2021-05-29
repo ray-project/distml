@@ -7,7 +7,7 @@ import ray
 from ray.util.collective.types import Backend
 from ray.util.collective.tests.conftest import clean_up
 
-from tests.jax_util import make_jax_ar_strategy, ToyOperator
+from tests.jax_util import make_jax_ps_strategy, ToyOperator
 
 import jax
 import jax.numpy as jnp
@@ -15,19 +15,22 @@ import jax.numpy as jnp
 from ray.util.sgd.utils import AverageMeterCollection
 
 
-class Test_allreduce_strategy_single_node_2workers:
-    world_size = 2
+class Test_ps_strategy_single_node_2workers:
+    num_worker = 1
+    num_ps = 1
 
     def setup_class(self):
-        world_size = self.world_size
+        num_worker = self.num_worker
+        num_ps = self.num_ps
+        world_size = num_worker + num_ps
         ray.init(num_gpus=world_size,
                  num_cpus=world_size * 2)
-        self.strategy = make_jax_ar_strategy(world_size)
+        self.strategy = make_jax_ps_strategy(num_ps,
+                                             num_worker)
 
     def teardown_class(self):
         del self.strategy
         ray.shutdown()
-        # os.system("ray stop")
 
     def test_init_strategy(self):
         self._check_sync_params()
@@ -35,8 +38,8 @@ class Test_allreduce_strategy_single_node_2workers:
     def _check_sync_params(self):
         strategy = self.strategy
 
-        rets = [replica.get_named_parameters.remote(cpu=True)
-                for replica in strategy.data_parallel_group.replicas]
+        rets = [actor.get_named_parameters.remote(cpu=True)
+                for actor in strategy.worker_group.actors]
 
         params = ray.get(rets)
 
@@ -62,13 +65,13 @@ class Test_allreduce_strategy_single_node_2workers:
         """
         strategy = self.strategy
 
-        steps = strategy.data_parallel_group.get_data_loader_len(training=False)
+        steps = strategy.worker_group.get_data_loader_len(training=False)
         metrics = [AverageMeterCollection()
-                   for _ in range(len(strategy.data_parallel_group.replicas))]
+                   for _ in range(len(strategy.worker_group.actors))]
 
-        strategy.data_parallel_group.make_iterator(training=False)
+        strategy.worker_group.make_iterator(training=False)
         for idx in range(steps):
-            batch_metrics = strategy.data_parallel_group.validate_batch()
+            batch_metrics = strategy.worker_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
                 samples_num = metric.pop("samples_num")
                 metrics[metric_idx].update(metric, n=samples_num)
@@ -91,25 +94,6 @@ class Test_allreduce_strategy_single_node_2workers:
         self._assert_shape(p, q)
         assert jnp.allclose(p, q)
 
-class Test_allreduce_strategy_single_node_multi_task:
-    def setup_class(self):
-        ray.init(num_gpus=8,
-                 num_cpus=16)
-
-    def teardown_class(self):
-        ray.shutdown()
-
-    # @pytest.mark.parametrize("num_task", [2,3,4])
-    # def test_multi_task(self, num_task):
-    #     """Just try to create multi-task.
-    #     Can not run multi-task asynchronous."""
-    #     strategy_list = []
-    #     for i in range(num_task):
-    #         strategy = make_jax_ar_strategy(group_name=f"task{i}")
-    #         strategy_list.append(strategy)
-    #
-    #     for i in range(num_task):
-    #         strategy_list[i].train()
 
 if __name__ == "__main__":
     import pytest
