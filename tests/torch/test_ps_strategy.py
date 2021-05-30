@@ -6,13 +6,11 @@ import os
 import ray
 from ray.util.collective.types import Backend
 from ray.util.collective.tests.conftest import clean_up
-
-from tests.jax_util import make_jax_ps_strategy, ToyOperator
-
-import jax
-import jax.numpy as jnp
-
 from ray.util.sgd.utils import AverageMeterCollection
+
+from tests.torch_util import make_torch_ps_strategy
+
+import torch
 
 
 class Test_ps_strategy_single_node_2workers:
@@ -25,8 +23,8 @@ class Test_ps_strategy_single_node_2workers:
         world_size = num_worker + num_ps
         ray.init(num_gpus=world_size,
                  num_cpus=world_size * 2)
-        self.strategy = make_jax_ps_strategy(num_ps,
-                                             num_worker)
+        self.strategy = make_torch_ps_strategy(
+            num_ps, num_worker)
 
     def teardown_class(self):
         del self.strategy
@@ -73,10 +71,10 @@ class Test_ps_strategy_single_node_2workers:
         for idx in range(steps):
             batch_metrics = strategy.worker_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
-                samples_num = metric.pop("samples_num")
-                metrics[metric_idx].update(metric, n=samples_num)
+                num_sample = metric.pop("num_sample")
+                metrics[metric_idx].update(metric, n=num_sample)
 
-        keys = ["num_samples", "val_loss", "val_accuracy"]
+        keys = ["num_sample", "val_loss", "val_accuracy"]
         num_replica = len(metrics)
         for key in keys:
             for i in range(num_replica - 1):
@@ -91,8 +89,13 @@ class Test_ps_strategy_single_node_2workers:
                                  "Got {} and {}.".format(p, q, shape1, shape2)
 
     def _assert_allclose(self, p, q):
+        if isinstance(p, torch.Tensor):
+            p = p.cpu().numpy()
+        if isinstance(q, torch.Tensor):
+            q = q.cpu().numpy()
+
         self._assert_shape(p, q)
-        assert jnp.allclose(p, q)
+        assert np.allclose(p, q)
 
 
 if __name__ == "__main__":

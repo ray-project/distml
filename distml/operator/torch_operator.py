@@ -168,8 +168,54 @@ class TorchTrainingOperator(TrainingOperator):
             loss = criterion(output, target)
 
         # Todo(Hao): report accuracy instead loss here.
-        batch_metric = {"val_loss": loss.item()}
+        batch_metric = {"val_loss": loss.item(), "num_sample": target.size(0)}
         return batch_metric
+
+    def get_named_parameters(self, cpu):
+        named_params = self._model.named_parameters()
+        is_cuda = next(self._model.parameters()).is_cuda
+        output_params = {}
+
+        if cpu:
+            if is_cuda:
+                for key, p in named_params:
+                    output_params[key] = p.cpu()
+            else:
+                for key, p in named_params:
+                    output_params[key] = p
+        else:
+            if not is_cuda:
+                for key, p in named_params:
+                    # TODO(HUI): should put in specific device.
+                    named_params[key] = p.cuda()
+            else:
+                for key, p in named_params:
+                    output_params[key] = p
+
+        return output_params
+
+    def get_parameters(self, cpu):
+        params = self._model.parameters()
+        is_cuda = next(self._model.parameters()).is_cuda
+        output_params = []
+
+        if cpu:
+            if is_cuda:
+                for p in params:
+                    output_params.append(p.cpu())
+            else:
+                for p in params:
+                    output_params.append(p)
+        else:
+            if not is_cuda:
+                for idx, p in enumerate(params):
+                    # TODO(HUI): should put in specific device.
+                    output_params(p.cuda())
+            else:
+                for p in params:
+                    output_params.append(p)
+
+        return output_params
 
     def get_states(self):
         """Return the states of this training operator."""
@@ -204,6 +250,38 @@ class TorchTrainingOperator(TrainingOperator):
         states = self.get_states()
         # TODO(Hao): test this.
         torch.save(states, checkpoint)
+
+    def clean_redundancy(self):
+        del self._train_loader
+        del self._validation_loader
+
+    def set_parameters(self, params):
+        if isinstance(params, dict):
+            self._model.load_state_dict(params)
+        else:
+            raise RuntimeError("params is not dict."
+                               "Got {}".format(type(params)))
+
+    def reset_optimizer_for_params(self, params):
+        if isinstance(params, dict):
+            params_list = []
+
+            for k, v in params.items():
+                params_list.append(v)
+            params = params_list
+
+        _optimizer = self._optimizer
+
+        _optimizer.param_groups = []
+
+        param_groups = list(params)
+        if len(param_groups) == 0:
+            raise ValueError("optimizer got an empty parameter list")
+        if not isinstance(param_groups[0], dict):
+            param_groups = [{'params': param_groups}]
+
+        for param_group in param_groups:
+            _optimizer.add_param_group(param_group)
 
     @staticmethod
     def _get_gradients(model):
@@ -244,3 +322,26 @@ class TorchTrainingOperator(TrainingOperator):
             #         to(p.grad.device)
             #     else:
             #         p.grad = torch.from_numpy(gradients[name])
+
+    def ones(self, shape, cpu: bool = True):
+        tensor = torch.ones(shape)
+        return tensor if cpu else tensor.cuda()
+
+    def zeros(self, shape, cpu: bool = True):
+        tensor = torch.zeros(shape)
+        return tensor if cpu else tensor.cuda()
+
+    def ones_like(self, x, cpu: bool = True):
+        tensor = torch.ones_like(x)
+        return tensor if cpu else tensor.cuda()
+
+    def zeros_like(self, x, cpu: bool = True):
+        tensor = torch.zeros_like(x)
+        return tensor if cpu else tensor.cuda()
+
+    @staticmethod
+    def numel(tensor):
+        return tensor.numel()
+
+    def asarray(self, v):
+        return torch.as_tensor(v)

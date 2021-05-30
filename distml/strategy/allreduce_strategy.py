@@ -100,8 +100,8 @@ class AllReduceStrategy(BaseStrategy):
             with self._collector.record("validate"):
                 batch_metrics = self.data_parallel_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
-                samples_num = metric.pop("samples_num")
-                metrics[metric_idx].update(metric, n=samples_num)
+                num_sample = metric.pop("num_sample")
+                metrics[metric_idx].update(metric, n=num_sample)
         self._collector.update(
             "validate", val_acc=batch_metrics[0]["val_loss"])
         self._collector.save("validate")

@@ -130,35 +130,3 @@ def make_jax_ps_strategy(num_ps=2, num_worker=2):
         })
 
     return strategy
-
-# class Worker(object):
-#     def __init__(self):
-#         self.strategy = None
-#
-#     def setup_ar_strategy(self):
-#         strategy = AllReduceStrategy(
-#             training_operator_cls=ToyOperator,
-#             initialization_hook=initialization_hook,
-#             world_size=2,
-#             operator_config={
-#                 "lr": 0.01,
-#                 "test_mode": True,  # subset the data
-#                 # this will be split across workers.
-#                 "batch_size": 16
-#             })
-#
-#         self.strategy = strategy
-
-# def setup_ps_strategy(self):
-#     strategy = ParameterServerStrategy(
-#         training_operator_cls=ToyOperator,
-#         initialization_hook=initialization_hook,
-#         world_size=2,
-#         operator_config={
-#             "lr": 0.01,
-#             "test_mode": True,  # subset the data
-#             # this will be split across workers.
-#             "batch_size": 16
-#         })
-#
-#     self.strategy = strategy

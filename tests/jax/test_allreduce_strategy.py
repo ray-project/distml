@@ -49,7 +49,7 @@ class Test_allreduce_strategy_single_node_2workers:
 
     @pytest.mark.parametrize("num_steps", [None, 2, 10])
     def test_train(self, num_steps):
-        self.strategy.train(num_steps) # train a full epoch
+        self.strategy.train(num_steps)
         self._check_sync_params()
 
     def test_validate(self):
@@ -70,10 +70,10 @@ class Test_allreduce_strategy_single_node_2workers:
         for idx in range(steps):
             batch_metrics = strategy.data_parallel_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
-                samples_num = metric.pop("samples_num")
-                metrics[metric_idx].update(metric, n=samples_num)
+                num_sample = metric.pop("num_sample")
+                metrics[metric_idx].update(metric, n=num_sample)
 
-        keys = ["num_samples", "val_loss", "val_accuracy"]
+        keys = ["num_sample", "val_loss", "val_accuracy"]
         num_replica = len(metrics)
         for key in keys:
             for i in range(num_replica - 1):

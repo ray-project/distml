@@ -18,7 +18,7 @@ from distml.operator.base_operator import TrainingOperator
 
 
 class JAXTrainingOperator(TrainingOperator):
-    def __init__(self, operator_config: Optional[Mapping[str, Any]]):
+    def __init__(self, *, operator_config: Optional[Mapping[str, Any]]):
         super(JAXTrainingOperator, self).__init__(operator_config)
         # Should be set by users in the `register` function.
         # model methods
@@ -272,12 +272,12 @@ class JAXTrainingOperator(TrainingOperator):
         targets_class = jnp.argmax(targets, axis=1)
 
         acc = jnp.mean(prediction_class == targets_class)
-        samples_num = targets.shape[0]
+        num_sample = targets.shape[0]
 
         return {
             "val_loss": loss.item(),
             "val_accuracy": acc.item(),
-            "samples_num": samples_num
+            "num_sample": num_sample
         }
 
     def get_parameters(self, cpu: bool) -> List:

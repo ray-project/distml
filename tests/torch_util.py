@@ -10,6 +10,7 @@ from torchvision.datasets import CIFAR10
 
 from distml.util import override
 from distml.strategy.allreduce_strategy import AllReduceStrategy
+from distml.strategy.ps_strategy import ParameterServerStrategy
 from distml.operator.torch_operator import TorchTrainingOperator
 
 __all__ = ["make_torch_ar_strategy", "make_torch_ps_strategy", "ToyOperator"]
@@ -20,7 +21,7 @@ def initialization_hook(self):
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"
 
-    os.environ["NCCL_SHM_DISABLE"] = 1
+    os.environ["NCCL_SHM_DISABLE"] = "1"
 
     # set the below if needed
     # print("NCCL DEBUG SET")
@@ -33,7 +34,7 @@ class ToyModel(nn.Module):
         self.conv1 = nn.Conv2d(3, 16, 3)
         self.relu = nn.ReLU()
         self.conv2 = nn.Conv2d(16, 32, 3)
-        self.pool = nn.AdaptiveAvgPool2d((1,1))
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc1 = nn.Linear(32, 10)
 
     def forward(self, x):
@@ -116,13 +117,14 @@ def make_torch_ar_strategy(world_size=2):
 
     return strategy
 
+
 def make_torch_ps_strategy(num_ps=2, num_worker=2):
     strategy = ParameterServerStrategy(
         training_operator_cls=ToyOperator,
         initialization_hook=initialization_hook,
         world_size=num_ps + num_worker,
-        num_ps = num_ps,
-        num_worker = num_worker,
+        num_ps=num_ps,
+        num_worker=num_worker,
         operator_config={
             "lr": 0.01,
             "test_mode": True,  # subset the data
@@ -131,36 +133,3 @@ def make_torch_ps_strategy(num_ps=2, num_worker=2):
         })
 
     return strategy
-
-
-# class Worker(object):
-#     def __init__(self):
-#         self.strategy = None
-#
-#     def setup_ar_strategy(self):
-#         strategy = AllReduceStrategy(
-#             training_operator_cls=ToyOperator,
-#             initialization_hook=initialization_hook,
-#             world_size=2,
-#             operator_config={
-#                 "lr": 0.01,
-#                 "test_mode": True,  # subset the data
-#                 # this will be split across workers.
-#                 "batch_size": 16
-#             })
-#
-#         self.strategy = strategy
-
-    # def setup_ps_strategy(self):
-    #     strategy = ParameterServerStrategy(
-    #         training_operator_cls=ToyOperator,
-    #         initialization_hook=initialization_hook,
-    #         world_size=2,
-    #         operator_config={
-    #             "lr": 0.01,
-    #             "test_mode": True,  # subset the data
-    #             # this will be split across workers.
-    #             "batch_size": 16
-    #         })
-    #
-    #     self.strategy = strategy

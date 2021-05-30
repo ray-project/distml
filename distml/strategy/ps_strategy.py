@@ -250,8 +250,8 @@ class ParameterServerStrategy(BaseStrategy):
         for idx in range(steps):
             batch_metrics = self.worker_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
-                samples_num = metric.pop("samples_num")
-                metrics[metric_idx].update(metric, n=samples_num)
+                num_sample = metric.pop("num_sample")
+                metrics[metric_idx].update(metric, n=num_sample)
         # Validate results should be the same in all workers
         return metrics[0].summary()
 
@@ -290,9 +290,9 @@ class PS(object):
         self.params = dict()
 
     def setup_operator(self):
-        # figure out the signature of training_operator_cls later.
+        """Instantiate the training operator."""
         self.training_operator = self.training_operator_cls(
-            self.operator_config)
+            operator_config=self.operator_config)
 
     def setup_collective_group(self,
                                rank: int,
@@ -421,7 +421,7 @@ class Worker(object):
     def setup_operator(self):
         # figure out the signature of training_operator_cls later.
         self.training_operator = self.training_operator_cls(
-            self.operator_config)
+            operator_config=self.operator_config)
 
     def setup_collective_group(self,
                                rank: int,
@@ -489,14 +489,11 @@ class Worker(object):
         # TODO (Hao): handling data loader next.
         return self.training_operator.derive_updates(batch)
 
-    # def compute_gradients(self, params):
     def compute_gradients(self):
-
         """
         Update worker parameters that received from server.
         Compute gradients and return named gradients.
         """
-        # self.set_parameters(params)
 
         try:
             batch = next(self.training_iterator)
@@ -512,6 +509,7 @@ class Worker(object):
         return loss_val, grads
 
     def split_gradients(self, grad, assignments) -> List:
+        """Splitting gradients according to assignments."""
         # assuming messages are gradients or parameters
         # this grad is ready to be called by apply_gradients in ParameterServer
         num_shards = np.unique(np.array(assignments)).size
@@ -521,6 +519,7 @@ class Worker(object):
         return shards
 
     def split_parameters(self, assignments) -> List:
+        """Splitting parameters according to assignments."""
         params = self.get_named_parameters(cpu=False)
         num_shards = np.unique(np.array(assignments)).size
         shards = [dict() for i in range(num_shards)]
@@ -770,6 +769,7 @@ class DataParallelGroup(BaseDataParallelGroup):
         return ray.get([ret])[0]
 
     def get_named_parameters(self, cpu: bool = False):
+        # self.actors[0].recv_params()
         ret = self.actors[0].get_named_parameters.remote(cpu)
         return ray.get([ret])[0]
 
