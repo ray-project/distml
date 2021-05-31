@@ -1,11 +1,7 @@
-"""Test the send/recv API."""
 import pytest
 import numpy as np
-import os
 
 import ray
-from ray.util.collective.types import Backend
-from ray.util.collective.tests.conftest import clean_up
 from ray.util.sgd.utils import AverageMeterCollection
 
 from tests.torch_util import make_torch_ar_strategy
@@ -18,8 +14,7 @@ class Test_allreduce_strategy_single_node_2workers:
 
     def setup_class(self):
         world_size = self.world_size
-        ray.init(num_gpus=world_size,
-                 num_cpus=world_size * 2)
+        ray.init(num_gpus=world_size, num_cpus=world_size * 2)
         self.strategy = make_torch_ar_strategy(world_size)
 
     def teardown_class(self):
@@ -31,8 +26,10 @@ class Test_allreduce_strategy_single_node_2workers:
     def _check_sync_params(self):
         strategy = self.strategy
 
-        rets = [replica.get_named_parameters.remote(cpu=True)
-                for replica in strategy.data_parallel_group.replicas]
+        rets = [
+            replica.get_named_parameters.remote(cpu=True)
+            for replica in strategy.data_parallel_group.replicas
+        ]
 
         params = ray.get(rets)
 
@@ -40,16 +37,15 @@ class Test_allreduce_strategy_single_node_2workers:
         num_replica = len(params)
         for key in keys:
             for i in range(num_replica - 1):
-                self._assert_allclose(params[i][key],
-                                      params[i+1][key])
+                self._assert_allclose(params[i][key], params[i + 1][key])
 
     @pytest.mark.parametrize("num_steps", [None, 2, 10])
     def test_train(self, num_steps):
-        self.strategy.train(num_steps) # train a full epoch
+        self.strategy.train(num_steps)
         self._check_sync_params()
 
     def test_validate(self):
-        metrics = self.strategy.validate()
+        self.strategy.validate()
 
     def test_validate_result(self):
         """Make sure all replicas validate results are the same.
@@ -58,9 +54,12 @@ class Test_allreduce_strategy_single_node_2workers:
         """
         strategy = self.strategy
 
-        steps = strategy.data_parallel_group.get_data_loader_len(training=False)
-        metrics = [AverageMeterCollection()
-                   for _ in range(len(strategy.data_parallel_group.replicas))]
+        steps = strategy.data_parallel_group.get_data_loader_len(
+            training=False)
+        metrics = [
+            AverageMeterCollection()
+            for _ in range(len(strategy.data_parallel_group.replicas))
+        ]
 
         strategy.data_parallel_group.make_iterator(training=False)
         for idx in range(steps):
@@ -97,4 +96,4 @@ if __name__ == "__main__":
     import pytest
     import sys
 
-    sys.exit(pytest.main(["-v", "-x", __file__])) #  ,"-s" # for debug
+    sys.exit(pytest.main(["-v", "-x", __file__]))

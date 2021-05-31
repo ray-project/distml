@@ -4,9 +4,8 @@ from filelock import FileLock
 import numpy as np
 
 from jax.experimental import stax
-from jax.experimental.stax import (AvgPool, BatchNorm, Dense,
-                                   Flatten, GeneralConv,
-                                   MaxPool, Relu, LogSoftmax)
+from jax.experimental.stax import (AvgPool, BatchNorm, Dense, Flatten,
+                                   GeneralConv, Relu, LogSoftmax)
 from jax import random
 from jax.experimental import optimizers
 import jax.numpy as jnp
@@ -40,9 +39,8 @@ def ToyModel(num_classes):
         GeneralConv(('NHWC', 'HWIO', 'NHWC'), 16, (3, 3), (1, 1), 'SAME'),
         BatchNorm(), Relu,
         GeneralConv(('NHWC', 'HWIO', 'NHWC'), 32, (1, 1), (1, 1), 'SAME'),
-        BatchNorm(), Relu,
-        AvgPool((7, 7), padding="SAME"),
-        Flatten, Dense(num_classes), LogSoftmax)
+        BatchNorm(), Relu, AvgPool((7, 7), padding="SAME"), Flatten,
+        Dense(num_classes), LogSoftmax)
 
 
 class ToyOperator(JAXTrainingOperator):
@@ -96,9 +94,7 @@ class ToyOperator(JAXTrainingOperator):
             train_loader=train_loader, validation_loader=test_loader)
 
 
-def make_jax_ar_strategy(world_size=2,
-                         backend="nccl",
-                         group_name="default"):
+def make_jax_ar_strategy(world_size=2, backend="nccl", group_name="default"):
     strategy = AllReduceStrategy(
         training_operator_cls=ToyOperator,
         initialization_hook=initialization_hook,

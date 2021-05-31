@@ -123,17 +123,3 @@ def func_timer(function):
         return result
 
     return function_timer
-
-class MeterDict(dict):
-
-    def __init__(self):
-        self = dict()
-
-    def update_v2(self, d):
-        self[key] = value
-
-        for k, v in d.items():
-            if k in self.keys():
-                self[k] += v
-            else:
-                self[k] = v

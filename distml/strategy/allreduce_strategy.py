@@ -93,7 +93,10 @@ class AllReduceStrategy(BaseStrategy):
         """
         steps = num_steps if num_steps \
             else self.data_parallel_group.get_data_loader_len(training=False)
-        metrics = [AverageMeterCollection() for _ in range(len(self.data_parallel_group.replicas))]
+        metrics = [
+            AverageMeterCollection()
+            for _ in range(len(self.data_parallel_group.replicas))
+        ]
 
         self.data_parallel_group.make_iterator(training=False)
         for idx in range(steps):
@@ -416,8 +419,6 @@ class DataParallelGroup(BaseDataParallelGroup):
     def get_named_parameters(self, cpu: bool = False):
         ret = self.replicas[0].get_named_parameters.remote(cpu)
         return ray.get([ret])[0]
-        # rets = [replica.get_named_parameters.remote(cpu) for replica in self.replicas]
-        # return ray.get(rets)[0]
 
     def apply_all_replicas(self, fn: Callable):
         """Apply fn in all replica processes and wait until completion."""

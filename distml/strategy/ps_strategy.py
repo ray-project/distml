@@ -244,7 +244,10 @@ class ParameterServerStrategy(BaseStrategy):
             rets.append(ret)
         ray.get(rets)
 
-        metrics = [AverageMeterCollection() for _ in range(len(self.worker_group.actors))]
+        metrics = [
+            AverageMeterCollection()
+            for _ in range(len(self.worker_group.actors))
+        ]
 
         # TODO(HUI): Construct a better tool to save validate results.
         for idx in range(steps):
@@ -317,14 +320,12 @@ class PS(object):
 
     def test_connection(self):
         for i in range(self.num_worker):
-            recv = util.zeros((1,), cpu=False)
-            col.recv(recv, i,
-                     group_name=self.group_name)
+            recv = util.zeros((1, ), cpu=False)
+            col.recv(recv, i, group_name=self.group_name)
             assert recv == 1
         for i in range(self.num_worker):
-            send = util.ones((1,), cpu=False)
-            col.send(send, i,
-                     group_name=self.group_name)
+            send = util.ones((1, ), cpu=False)
+            col.send(send, i, group_name=self.group_name)
         return
 
     def _init_grad_counts(self):
@@ -362,8 +363,7 @@ class PS(object):
         """ Send this param shard to the destination worker """
         for name, v in self.params.items():
             cv = self.training_operator.to_cupy(v)
-            col.send(cv, dst_rank,
-                     group_name=self.group_name)
+            col.send(cv, dst_rank, group_name=self.group_name)
 
     def update(self, src_rank: int):
         """Receive gradients and update"""
@@ -446,13 +446,11 @@ class Worker(object):
 
     def test_connection(self):
         for i in range(self.num_ps):
-            send = util.ones((1,), cpu=False)
-            col.send(send, self.num_worker + i,
-                     group_name=self.group_name)
+            send = util.ones((1, ), cpu=False)
+            col.send(send, self.num_worker + i, group_name=self.group_name)
         for i in range(self.num_ps):
-            recv = util.zeros((1,), cpu=False)
-            col.recv(recv, self.num_worker + i,
-                     group_name=self.group_name)
+            recv = util.zeros((1, ), cpu=False)
+            col.recv(recv, self.num_worker + i, group_name=self.group_name)
             assert recv == 1
         return
 
@@ -548,8 +546,7 @@ class Worker(object):
         for i in range(self.num_ps):
             for j in range(len(self.name_list[i])):
                 v = self.training_operator.to_cupy(recv_list[i][j])
-                col.recv(v, self.num_worker + i,
-                         group_name=self.group_name)
+                col.recv(v, self.num_worker + i, group_name=self.group_name)
 
         # 3. Set params in workers.
         for i in range(self.num_ps):
@@ -594,8 +591,7 @@ class Worker(object):
             this_shard = self.index_shard(split_grad, i)
             for _, v in this_shard.items():
                 cv = self.training_operator.to_cupy(v)
-                col.send(cv, self.num_worker + i,
-                         group_name=self.group_name)
+                col.send(cv, self.num_worker + i, group_name=self.group_name)
         return metrics
 
     def validate_batch(self):

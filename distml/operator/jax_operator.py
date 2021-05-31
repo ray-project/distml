@@ -428,7 +428,8 @@ class JAXTrainingOperator(TrainingOperator):
         if self._custom_states:
             states.update({"custom": self.get_custom_states()})
 
-        if self.lr_scheduler and hasattr(self.lr_scheduler, "get_state_dict()"):
+        if self.lr_scheduler and hasattr(self.lr_scheduler,
+                                         "get_state_dict()"):
             states.update({"lr_scheduler": self.lr_scheduler.get_state_dict()})
 
         return states
@@ -438,11 +439,10 @@ class JAXTrainingOperator(TrainingOperator):
         with open(checkpoint, "wb") as f:
             pickle.dump(states, f)
 
-    def load_states(self,
-                    states=None,
-                    checkpoint: Optional[str] = None):
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
         if checkpoint:
-            assert ".pkl" in checkpoint, "checkpoint should be a .pkl file. Got {}".format(checkpoint)
+            assert ".pkl" in checkpoint, \
+                "checkpoint should be a .pkl file. Got {}".format(checkpoint)
             with open(checkpoint, "rb") as f:
                 states = pickle.load(f)
 
@@ -455,16 +455,16 @@ class JAXTrainingOperator(TrainingOperator):
                 raise RuntimeError("subtrees of new params is empty.")
 
             states_flat, tree, subtrees = self.opt_state
-            states_flat_2, subtrees_2 = unzip2(map(tree_flatten, tmp_opt_states))
+            states_flat_2, subtrees_2 = unzip2(
+                map(tree_flatten, tmp_opt_states))
 
             if not subtrees_2:
                 raise RuntimeError("subtrees of new params is empty.")
             for idx, (subtree, subtree_2) in enumerate(
                     zip(subtrees, subtrees_2)):
                 if subtree_2 != subtree:
-                    msg = (
-                        "input structure did not match the save params structure. "
-                        "input {} and output {}.")
+                    msg = ("input structure did not match the save params "
+                           "structure. input {} and output {}.")
                     raise TypeError(msg.format(subtree, subtree_2))
 
             self.opt_state = OptimizerState(states_flat_2, tree, subtrees_2)
@@ -476,8 +476,8 @@ class JAXTrainingOperator(TrainingOperator):
                 if hasattr(self.lr_scheduler, "set_states_dict"):
                     self.lr_scheduler.set_states_dict(lr_scheduler_states)
                 else:
-                    warnings.warn("lr scheduler must have `set_states_dict` method"
-                                  " to support loading lr scheduler states.")
+                    warnings.warn(
+                        "lr scheduler must have `set_states_dict` method"
+                        " to support loading lr scheduler states.")
         else:
             raise RuntimeError("This checkpoint doesn't have `opt_state` key.")
-

@@ -1,16 +1,12 @@
 """Test the send/recv API."""
 import pytest
 import numpy as np
-import os
+import torch
 
 import ray
-from ray.util.collective.types import Backend
-from ray.util.collective.tests.conftest import clean_up
 from ray.util.sgd.utils import AverageMeterCollection
 
 from tests.torch_util import make_torch_ps_strategy
-
-import torch
 
 
 class Test_ps_strategy_single_node_2workers:
@@ -21,10 +17,8 @@ class Test_ps_strategy_single_node_2workers:
         num_worker = self.num_worker
         num_ps = self.num_ps
         world_size = num_worker + num_ps
-        ray.init(num_gpus=world_size,
-                 num_cpus=world_size * 2)
-        self.strategy = make_torch_ps_strategy(
-            num_ps, num_worker)
+        ray.init(num_gpus=world_size, num_cpus=world_size * 2)
+        self.strategy = make_torch_ps_strategy(num_ps, num_worker)
 
     def teardown_class(self):
         del self.strategy
@@ -36,8 +30,10 @@ class Test_ps_strategy_single_node_2workers:
     def _check_sync_params(self):
         strategy = self.strategy
 
-        rets = [actor.get_named_parameters.remote(cpu=True)
-                for actor in strategy.worker_group.actors]
+        rets = [
+            actor.get_named_parameters.remote(cpu=True)
+            for actor in strategy.worker_group.actors
+        ]
 
         params = ray.get(rets)
 
@@ -45,8 +41,7 @@ class Test_ps_strategy_single_node_2workers:
         num_replica = len(params)
         for key in keys:
             for i in range(num_replica - 1):
-                self._assert_allclose(params[i][key],
-                                      params[i+1][key])
+                self._assert_allclose(params[i][key], params[i + 1][key])
 
     @pytest.mark.parametrize("num_steps", [None, 2, 10])
     def test_train(self, num_steps):
@@ -54,7 +49,7 @@ class Test_ps_strategy_single_node_2workers:
         self._check_sync_params()
 
     def test_validate(self):
-        metrics = self.strategy.validate()
+        self.strategy.validate()
 
     def test_validate_result(self):
         """Make sure all workers validate results are the same.
@@ -64,8 +59,10 @@ class Test_ps_strategy_single_node_2workers:
         strategy = self.strategy
 
         steps = strategy.worker_group.get_data_loader_len(training=False)
-        metrics = [AverageMeterCollection()
-                   for _ in range(len(strategy.worker_group.actors))]
+        metrics = [
+            AverageMeterCollection()
+            for _ in range(len(strategy.worker_group.actors))
+        ]
 
         strategy.worker_group.make_iterator(training=False)
         for idx in range(steps):
@@ -102,4 +99,4 @@ if __name__ == "__main__":
     import pytest
     import sys
 
-    sys.exit(pytest.main(["-v", "-x", __file__])) #  ,"-s" # for debug
+    sys.exit(pytest.main(["-v", "-x", __file__]))
