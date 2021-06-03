@@ -38,8 +38,7 @@ class Test_torch_operator:
         assert isinstance(loss_val, float)
         assert isinstance(grads, dict)
 
-        assert len(grads) == \
-               len(operator.get_states()["model"])
+        assert (len(grads) == len(operator.get_states()["model"]))
 
         operator.apply_updates(grads)
 

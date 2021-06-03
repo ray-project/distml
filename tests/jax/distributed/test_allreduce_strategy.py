@@ -1,22 +1,16 @@
 import pytest
-import jax.numpy as jnp
-
 import ray
 from ray.util.sgd.utils import AverageMeterCollection
 
-from tests.jax_util import make_jax_ps_strategy
+from tests.jax_util import make_jax_ar_strategy
 
-
-class Test_ps_strategy_single_node_2workers:
-    num_worker = 1
-    num_ps = 1
+class Test_allreduce_strategy_two_node_2workers:
+    world_size = 2
 
     def setup_class(self):
-        num_worker = self.num_worker
-        num_ps = self.num_ps
-        world_size = num_worker + num_ps
-        ray.init(num_gpus=world_size, num_cpus=world_size * 2)
-        self.strategy = make_jax_ps_strategy(num_ps, num_worker)
+        world_size = self.world_size
+        ray.init(address="auto")
+        self.strategy = make_jax_ar_strategy(world_size)
 
     def teardown_class(self):
         del self.strategy
@@ -28,10 +22,8 @@ class Test_ps_strategy_single_node_2workers:
     def _check_sync_params(self):
         strategy = self.strategy
 
-        rets = [
-            actor.get_named_parameters.remote(cpu=True)
-            for actor in strategy.worker_group.actors
-        ]
+        rets = [replica.get_named_parameters.remote(cpu=True)
+                for replica in strategy.data_parallel_group.replicas]
 
         params = ray.get(rets)
 
@@ -39,7 +31,8 @@ class Test_ps_strategy_single_node_2workers:
         num_replica = len(params)
         for key in keys:
             for i in range(num_replica - 1):
-                self._assert_allclose(params[i][key], params[i + 1][key])
+                self._assert_allclose(params[i][key],
+                                      params[i + 1][key])
 
     @pytest.mark.parametrize("num_steps", [None, 2, 10])
     def test_train(self, num_steps):
@@ -50,26 +43,24 @@ class Test_ps_strategy_single_node_2workers:
         self.strategy.validate()
 
     def test_validate_result(self):
-        """Make sure all workers validate results are the same.
+        """Make sure all replicas validate results are the same.
 
         But it cant be test after using distributed sampler.
         """
         strategy = self.strategy
 
-        steps = strategy.worker_group.get_data_loader_len(training=False)
-        metrics = [
-            AverageMeterCollection()
-            for _ in range(len(strategy.worker_group.actors))
-        ]
+        steps = strategy.data_parallel_group.get_data_loader_len(training=False)
+        metrics = [AverageMeterCollection()
+                   for _ in range(len(strategy.data_parallel_group.replicas))]
 
-        strategy.worker_group.make_iterator(training=False)
+        strategy.data_parallel_group.make_iterator(training=False)
         for idx in range(steps):
-            batch_metrics = strategy.worker_group.validate_batch()
+            batch_metrics = strategy.data_parallel_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
-                samples_num = metric.pop("samples_num")
-                metrics[metric_idx].update(metric, n=samples_num)
+                num_sample = metric.pop("num_sample")
+                metrics[metric_idx].update(metric, n=num_sample)
 
-        keys = ["num_samples", "val_loss", "val_accuracy"]
+        keys = ["num_sample", "val_loss", "val_accuracy"]
         num_replica = len(metrics)
         for key in keys:
             for i in range(num_replica - 1):
@@ -87,9 +78,8 @@ class Test_ps_strategy_single_node_2workers:
         self._assert_shape(p, q)
         assert jnp.allclose(p, q)
 
-
 if __name__ == "__main__":
     import pytest
     import sys
 
-    sys.exit(pytest.main(["-v", "-x", __file__]))
+    sys.exit(pytest.main(["-v", "-x", __file__])) #  ,"-s" # for debug

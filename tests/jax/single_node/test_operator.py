@@ -53,8 +53,8 @@ class Test_jax_operator:
         assert isinstance(loss_val, float)
         assert isinstance(grads, dict)
 
-        assert len(grads) == \
-               len(operator.get_parameters(cpu=True))
+        assert (len(grads) ==
+                len(operator.get_parameters(cpu=True)))
 
         operator.apply_updates(grads)
 
@@ -66,14 +66,14 @@ class Test_jax_operator:
         params = copy.deepcopy(params)
 
         states_flat, tree, subtrees = operator.opt_state
-        new_states_flat, new_subtrees = unzip2(
-            map(tree_flatten, states["opt_state"]))
+        new_states_flat, new_subtrees = unzip2(map(tree_flatten, states["opt_state"]))
         new_opt_state = OptimizerState(new_states_flat, tree, new_subtrees)
         params_1 = operator.get_params(new_opt_state)
         params_1, _ = tree_flatten(params_1)
 
         for idx in range(len(params)):
-            self._assert_allclose(params[idx], params_1[idx])
+            self._assert_allclose(
+                params[idx], params_1[idx])
 
         tmp_state_path = "tmp_states.pkl"
         operator.save_states(tmp_state_path)
@@ -91,23 +91,49 @@ class Test_jax_operator:
 
         with pytest.raises(AssertionError):
             params_2 = operator.get_parameters(cpu=True)
-            self._assert_allclose(params[0], params_2[0])
+            self._assert_allclose(
+                params[0], params_2[0])
 
         operator.load_states(checkpoint=tmp_state_path)
         params_2 = operator.get_parameters(cpu=True)
 
         for idx in range(len(params)):
-            self._assert_allclose(params[idx], params_2[idx])
+            self._assert_allclose(
+                params[idx], params_2[idx])
 
         train_batch()
         operator.load_states(states=states)
         params_3 = operator.get_parameters(cpu=True)
 
         for idx in range(len(params)):
-            self._assert_allclose(params[idx], params_3[idx])
+            self._assert_allclose(
+                params[idx], params_3[idx])
 
-    @pytest.mark.parametrize("array_shape", [(1, ), (3, 3), (1, 1, 1),
-                                             (3, 3, 3), (3, 3, 3, 3)])
+    def test_custom_states(self):
+        operator = self.operator
+
+        custom_states = {
+            "random_state1": jax.device_put(np.random.rand(1)),
+            "random_state2": jax.device_put(np.random.rand(10, 10)),
+            "random_state3": jax.device_put(np.random.rand(10, 100)),
+        }
+        operator.register_custom_states(custom_states)
+
+        state = operator.get_states()
+
+        custom_states_2 = state.get("custom_states", None)
+
+        if custom_states_2:
+            keys = custom_states.keys()
+            keys_2 = custom_states_2.keys()
+            assert keys == keys_2
+            for key in keys:
+                self._assert_allclose(
+                    custom_states[key], custom_states_2[key]
+                )
+
+    @pytest.mark.parametrize("array_shape",
+                             [(1,), (3, 3), (1, 1, 1), (3, 3, 3), (3, 3, 3, 3)])
     def test_to_cupy(self, array_shape):
         operator = self.operator
 
@@ -116,11 +142,11 @@ class Test_jax_operator:
         cupy_tensor = operator.to_cupy(tensor)
 
         assert isinstance(cupy_tensor, cp.ndarray)
-        assert cupy_tensor.data.ptr == \
-               tensor.device_buffer.unsafe_buffer_pointer()
+        assert (cupy_tensor.data.ptr ==
+                tensor.device_buffer.unsafe_buffer_pointer())
 
-    @pytest.mark.parametrize("array_shape", [(1, ), (3, 3), (1, 1, 1),
-                                             (3, 3, 3), (3, 3, 3, 3)])
+    @pytest.mark.parametrize("array_shape",
+                             [(1,), (3, 3), (1, 1, 1), (3, 3, 3), (3, 3, 3, 3)])
     def test_get_jax_dlpack(self, array_shape):
         operator = self.operator
 
@@ -129,8 +155,8 @@ class Test_jax_operator:
         jax_tensor = operator.to_operator_tensor(tensor)
 
         assert isinstance(jax_tensor, jnp.ndarray)
-        assert tensor.data.ptr == \
-               jax_tensor.device_buffer.unsafe_buffer_pointer()
+        assert (tensor.data.ptr ==
+                jax_tensor.device_buffer.unsafe_buffer_pointer())
 
     @pytest.mark.parametrize("num_key", [1, 3, 5])
     def test_reset_optimizer(self, num_key):
@@ -153,7 +179,8 @@ class Test_jax_operator:
         assert params_2.keys() == new_params.keys()
 
         for key in params_2.keys():
-            self._assert_allclose(params_2[key], new_params[key])
+            self._assert_allclose(
+                params_2[key], new_params[key])
 
     def test_clean_redundancy(self):
         operator = self.operator
