@@ -7,16 +7,15 @@ from ray.util.sgd.utils import AverageMeterCollection
 from tests.jax_util import make_jax_ps_strategy
 
 
-class Test_ps_strategy_single_node_2workers:
-    num_worker = 1
-    num_ps = 1
+class Test_ps_strategy_two_node_2workers_2server:
+    num_worker = 2
+    num_ps = 2
 
     def setup_class(self):
         num_worker = self.num_worker
         num_ps = self.num_ps
-        ray.init(address="auto")
-        self.strategy = make_jax_ps_strategy(num_ps,
-                                             num_worker)
+        ray.init("auto")
+        self.strategy = make_jax_ps_strategy(num_ps, num_worker)
 
     def teardown_class(self):
         del self.strategy
@@ -28,8 +27,10 @@ class Test_ps_strategy_single_node_2workers:
     def _check_sync_params(self):
         strategy = self.strategy
 
-        rets = [actor.get_named_parameters.remote(cpu=True)
-                for actor in strategy.worker_group.actors]
+        rets = [
+            actor.get_named_parameters.remote(cpu=True)
+            for actor in strategy.worker_group.actors
+        ]
 
         params = ray.get(rets)
 
@@ -37,8 +38,7 @@ class Test_ps_strategy_single_node_2workers:
         num_replica = len(params)
         for key in keys:
             for i in range(num_replica - 1):
-                self._assert_allclose(params[i][key],
-                                      params[i + 1][key])
+                self._assert_allclose(params[i][key], params[i + 1][key])
 
     @pytest.mark.parametrize("num_steps", [None, 2, 10])
     def test_train(self, num_steps):
@@ -56,15 +56,17 @@ class Test_ps_strategy_single_node_2workers:
         strategy = self.strategy
 
         steps = strategy.worker_group.get_data_loader_len(training=False)
-        metrics = [AverageMeterCollection()
-                   for _ in range(len(strategy.worker_group.actors))]
+        metrics = [
+            AverageMeterCollection()
+            for _ in range(len(strategy.worker_group.actors))
+        ]
 
         strategy.worker_group.make_iterator(training=False)
         for idx in range(steps):
             batch_metrics = strategy.worker_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
-                samples_num = metric.pop("samples_num")
-                metrics[metric_idx].update(metric, n=samples_num)
+                num_sample = metric.pop("num_sample")
+                metrics[metric_idx].update(metric, n=num_sample)
 
         keys = ["num_samples", "val_loss", "val_accuracy"]
         num_replica = len(metrics)
@@ -72,6 +74,35 @@ class Test_ps_strategy_single_node_2workers:
             for i in range(num_replica - 1):
                 assert metrics[i]._meters[key].avg - \
                        metrics[i + 1]._meters[key].avg < 1e-4
+
+    def test_states(self):
+        def _assert_states(opt_state1, opt_state2):
+            assert opt_state1.keys() == opt_state2.keys()
+
+            for key in opt_state1.keys():
+                for idx in range(len(opt_state1[key])):
+                    self._assert_allclose(opt_state1[key][idx],
+                                          opt_state2[key][idx])
+
+        strategy = self.strategy
+        checkpoint = "test_ps_strategy_states.pkl"
+
+        strategy.train(1)
+        states1 = strategy.get_states()
+
+        strategy.save_states(checkpoint=checkpoint)
+
+        strategy.train(1)  # make states different.
+        strategy.load_states(checkpoint=checkpoint)
+        states2 = strategy.get_states()
+
+        _assert_states(states1["opt_state"], states2["opt_state"])
+
+        strategy.train(1)  # make states different.
+        strategy.load_states(states=states1)
+        states3 = strategy.get_states()
+
+        _assert_states(states1["opt_state"], states3["opt_state"])
 
     def _assert_shape(self, p, q):
         shape1 = p.shape

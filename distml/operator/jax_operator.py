@@ -1,5 +1,7 @@
+import os
 import pickle
 import warnings
+
 from typing import Any, Mapping, Optional, List, Dict
 
 import numpy as np
@@ -289,6 +291,8 @@ class JAXTrainingOperator(TrainingOperator):
 
         if cpu:
             flatten_params = list(map(np.asarray, flatten_params))
+        else:
+            flatten_params = list(map(jnp.asarray, flatten_params))
         return flatten_params
 
     def get_named_parameters(self, cpu: bool) -> Dict:
@@ -358,6 +362,8 @@ class JAXTrainingOperator(TrainingOperator):
                                "Got {}".format(type(params)))
 
         keys, params = unzip2(sorted(params.items(), key=lambda d: int(d[0])))
+
+        self.preset_keys = keys  # The keys to index the params.
         self.tree = tree_structure(params)
         self.opt_state = self.opt_init(params)
 
@@ -419,10 +425,15 @@ class JAXTrainingOperator(TrainingOperator):
 
         states_flat, tree, subtrees = self.opt_state
 
-        states = map(tree_unflatten, subtrees, states_flat)
+        states_unflat = map(tree_unflatten, subtrees, states_flat)
+
+        states_unflat_dict = {
+            str(idx): value
+            for idx, value in enumerate(states_unflat)
+        }
 
         states = {
-            "opt_state": list(states),
+            "opt_state": states_unflat_dict,
         }
 
         if self._custom_states:
@@ -439,24 +450,51 @@ class JAXTrainingOperator(TrainingOperator):
         with open(checkpoint, "wb") as f:
             pickle.dump(states, f)
 
-    def load_states(self, states=None, checkpoint: Optional[str] = None):
+    def load_states(self,
+                    states=None,
+                    checkpoint: Optional[str] = None,
+                    keys: Optional = None):
         if checkpoint:
             assert ".pkl" in checkpoint, \
                 "checkpoint should be a .pkl file. Got {}".format(checkpoint)
+            if not os.path.exists(checkpoint):
+                raise RuntimeError("Checkpoint file doesn't exists.")
             with open(checkpoint, "rb") as f:
                 states = pickle.load(f)
 
         if states:
-            tmp_opt_states = states.pop("opt_state", None)
-            custom_states = states.pop("custom_states", None)
-            lr_scheduler_states = states.pop("lr_scheduler", None)
+            new_opt_states = states.get("opt_state", None)
+            custom_states = states.get("custom_states", None)
+            lr_scheduler_states = states.get("lr_scheduler", None)
 
-            if not tmp_opt_states:
+            if not new_opt_states:
                 raise RuntimeError("subtrees of new params is empty.")
+
+            assert isinstance(new_opt_states, dict)
+
+            if not keys:
+                keys = tuple([
+                    str(idx)
+                    for idx in range(len(self.get_parameters(cpu=False)))
+                ])
+            else:
+                # construct_opt_states_dict = OrderedDict()
+                construct_opt_states_dict = dict()
+                for key in keys:
+                    construct_opt_states_dict[key] = new_opt_states[key]
+                new_opt_states = construct_opt_states_dict
+
+            new_keys, new_opt_states = unzip2(
+                sorted(new_opt_states.items(), key=lambda d: int(d[0])))
+
+            keys = tuple(keys)
+            new_keys = tuple(new_keys)
+            assert keys == new_keys, \
+                "checkpoint key doesn't match the model params."
 
             states_flat, tree, subtrees = self.opt_state
             states_flat_2, subtrees_2 = unzip2(
-                map(tree_flatten, tmp_opt_states))
+                map(tree_flatten, new_opt_states))
 
             if not subtrees_2:
                 raise RuntimeError("subtrees of new params is empty.")
@@ -480,4 +518,6 @@ class JAXTrainingOperator(TrainingOperator):
                         "lr scheduler must have `set_states_dict` method"
                         " to support loading lr scheduler states.")
         else:
-            raise RuntimeError("This checkpoint doesn't have `opt_state` key.")
+            raise RuntimeError("This checkpoint is empty."
+                               "Got checkpoint {}, states {}".format(
+                                   checkpoint, states))

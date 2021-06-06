@@ -157,6 +157,15 @@ class AllReduceStrategy(BaseStrategy):
     def load_parameters(self, checkpoint: str):
         self.data_parallel_group.load_parameters(checkpoint)
 
+    def get_states(self):
+        return self.data_parallel_group.get_states()
+
+    def save_states(self, checkpoint: str):
+        self.data_parallel_group.save_states(checkpoint)
+
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        self.data_parallel_group.load_states(states, checkpoint)
+
 
 class Replica:
     """Express the training semantics of a data-parallel replica.
@@ -259,6 +268,15 @@ class Replica:
         if self.training_operator:
             del self.training_operator
         return 1
+
+    def get_states(self):
+        return self.training_operator.get_states()
+
+    def save_states(self, checkpoint: str):
+        self.training_operator.save_states(checkpoint)
+
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        self.training_operator.load_states(states, checkpoint)
 
     def get_parameters(self, cpu: bool) -> List:
         return self.training_operator.get_parameters(cpu)
@@ -393,6 +411,21 @@ class DataParallelGroup(BaseDataParallelGroup):
 
     def reset(self):
         pass
+
+    def get_states(self):
+        rets = [self.replicas[0].get_states.remote()]
+        return ray.get(rets)[0]
+
+    def save_states(self, checkpoint: str):
+        rets = [self.replicas[0].save_states.remote(checkpoint)]
+        ray.get(rets)
+
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        rets = [
+            replica.load_states.remote(states, checkpoint)
+            for replica in self.replicas
+        ]
+        ray.get(rets)
 
     def save_parameters(self, checkpoint: str):
         rets = [self.replicas[0].save_parameters.remote(checkpoint)]

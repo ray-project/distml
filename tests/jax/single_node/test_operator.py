@@ -1,5 +1,3 @@
-import copy
-
 import pytest
 import cupy as cp
 import numpy as np
@@ -53,29 +51,26 @@ class Test_jax_operator:
         assert isinstance(loss_val, float)
         assert isinstance(grads, dict)
 
-        assert (len(grads) ==
-                len(operator.get_parameters(cpu=True)))
+        assert (len(grads) == len(operator.get_parameters(cpu=True)))
 
         operator.apply_updates(grads)
 
     def test_states(self):
         operator = self.operator
         states = operator.get_states()
-        states = copy.deepcopy(states)
         params = operator.get_parameters(cpu=True)
-        params = copy.deepcopy(params)
 
         states_flat, tree, subtrees = operator.opt_state
-        new_states_flat, new_subtrees = unzip2(map(tree_flatten, states["opt_state"]))
+        new_states_flat, new_subtrees = unzip2(
+            map(tree_flatten, states["opt_state"].values()))
         new_opt_state = OptimizerState(new_states_flat, tree, new_subtrees)
         params_1 = operator.get_params(new_opt_state)
         params_1, _ = tree_flatten(params_1)
 
         for idx in range(len(params)):
-            self._assert_allclose(
-                params[idx], params_1[idx])
+            self._assert_allclose(params[idx], params_1[idx])
 
-        tmp_state_path = "tmp_states.pkl"
+        tmp_state_path = "test_operator_states.pkl"
         operator.save_states(tmp_state_path)
         iterator = iter(operator._train_loader)
 
@@ -85,29 +80,56 @@ class Test_jax_operator:
             operator.apply_updates(grads)
 
         train_batch()
-        batch = next(iterator)
-        loss_val, grads = operator.derive_updates(batch)
-        operator.apply_updates(grads)
 
         with pytest.raises(AssertionError):
             params_2 = operator.get_parameters(cpu=True)
-            self._assert_allclose(
-                params[0], params_2[0])
+            self._assert_allclose(params[0], params_2[0])
 
         operator.load_states(checkpoint=tmp_state_path)
         params_2 = operator.get_parameters(cpu=True)
 
         for idx in range(len(params)):
-            self._assert_allclose(
-                params[idx], params_2[idx])
+            self._assert_allclose(params[idx], params_2[idx])
 
         train_batch()
         operator.load_states(states=states)
         params_3 = operator.get_parameters(cpu=True)
 
         for idx in range(len(params)):
-            self._assert_allclose(
-                params[idx], params_3[idx])
+            self._assert_allclose(params[idx], params_3[idx])
+
+    def test_load_states_with_keys(self):
+        num_key = 5
+        operator = self.operator
+
+        states1 = operator.get_states()
+        params = operator.get_named_parameters(cpu=True)
+
+        new_params = {}
+        new_keys = []
+        num = 0
+        for k, v in params.items():
+            if num == num_key:
+                break
+            new_params[k] = jnp.zeros_like(v)
+            new_keys.append(k)
+            num += 1
+
+        new_keys = tuple(new_keys)
+
+        operator.reset_optimizer_for_params(new_params)
+
+        operator.load_states(states=states1, keys=new_keys)
+
+        states2 = operator.get_states()
+
+        opt_state1 = states1["opt_state"]
+        opt_state2 = states2["opt_state"]
+
+        for key in new_keys:
+            for idx in range(len(opt_state1[key])):
+                self._assert_allclose(opt_state1[key][idx],
+                                      opt_state2[key][idx])
 
     def test_custom_states(self):
         operator = self.operator
@@ -128,12 +150,10 @@ class Test_jax_operator:
             keys_2 = custom_states_2.keys()
             assert keys == keys_2
             for key in keys:
-                self._assert_allclose(
-                    custom_states[key], custom_states_2[key]
-                )
+                self._assert_allclose(custom_states[key], custom_states_2[key])
 
-    @pytest.mark.parametrize("array_shape",
-                             [(1,), (3, 3), (1, 1, 1), (3, 3, 3), (3, 3, 3, 3)])
+    @pytest.mark.parametrize("array_shape", [(1, ), (3, 3), (1, 1, 1),
+                                             (3, 3, 3), (3, 3, 3, 3)])
     def test_to_cupy(self, array_shape):
         operator = self.operator
 
@@ -145,8 +165,8 @@ class Test_jax_operator:
         assert (cupy_tensor.data.ptr ==
                 tensor.device_buffer.unsafe_buffer_pointer())
 
-    @pytest.mark.parametrize("array_shape",
-                             [(1,), (3, 3), (1, 1, 1), (3, 3, 3), (3, 3, 3, 3)])
+    @pytest.mark.parametrize("array_shape", [(1, ), (3, 3), (1, 1, 1),
+                                             (3, 3, 3), (3, 3, 3, 3)])
     def test_get_jax_dlpack(self, array_shape):
         operator = self.operator
 
@@ -171,6 +191,7 @@ class Test_jax_operator:
             if num == num_key:
                 break
             new_params[k] = v
+            num += 1
 
         operator.reset_optimizer_for_params(new_params)
 
@@ -179,8 +200,7 @@ class Test_jax_operator:
         assert params_2.keys() == new_params.keys()
 
         for key in params_2.keys():
-            self._assert_allclose(
-                params_2[key], new_params[key])
+            self._assert_allclose(params_2[key], new_params[key])
 
     def test_clean_redundancy(self):
         operator = self.operator

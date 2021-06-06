@@ -172,15 +172,35 @@ class ParameterServerStrategy(BaseStrategy):
         self.worker_group.shutdown(force=force)
         self.server_group.shutdown(force=force)
 
+    def get_states(self):
+        # worker0 pull latest params and return states.
+        for server_idx, server in enumerate(self.server_group.actors):
+            # every server sends its shard to the worker0
+            server.send_params.remote(0)
+        # the worker0 receives shards from ps.
+        ret = self.worker_group.actors[0].recv_params.remote()
+        ray.get([ret])
+
+        return self.worker_group.get_states()
+
+    def save_states(self, checkpoint: str):
+        # worker0 pull latest params.
+        for server_idx, server in enumerate(self.server_group.actors):
+            server.send_params.remote(0)
+        ret = self.worker_group.actors[0].recv_params.remote()
+        ray.get([ret])
+        # Then, worker0 save parameters.
+        self.worker_group.save_states(checkpoint)
+
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        self.server_group.load_states(states=states, checkpoint=checkpoint)
+
     def save_parameters(self, checkpoint: str):
         # TODO(HUI): ps save parameters.
-        # First, worker rank 0 should pull the latest parameter from servers
-        # Then, worker rank 0 save parameters
         self.worker_group.save_parameters(checkpoint)
 
     def load_parameters(self, checkpoint: str):
         # TODO(HUI): ps load parameters.
-        # shard parameters and send to all servers.
         self.server_group.load_parameters(checkpoint)
 
     def _round_robin_sharding(self):
@@ -204,7 +224,7 @@ class ParameterServerStrategy(BaseStrategy):
                 function will simply train for one epoch.
 
         Returns:
-            None
+            metrics (dict)
         """
         # TODO (Hao): add fault tolerance using `max_retries`.
         steps = num_steps if num_steps \
@@ -303,7 +323,7 @@ class PS(object):
                                num_worker: int,
                                backend: str = "nccl",
                                group_name: str = "default"):
-        # rank should be true rank. means, rank has already plus num_worker.
+        # rank has already plus num_worker.
         self.rank = rank
         self.num_ps = num_ps
         self.num_worker = num_worker
@@ -326,7 +346,6 @@ class PS(object):
         for i in range(self.num_worker):
             send = util.ones((1, ), cpu=False)
             col.send(send, i, group_name=self.group_name)
-        return
 
     def _init_grad_counts(self):
         self.grad_counts = [0] * self.num_worker
@@ -349,8 +368,21 @@ class PS(object):
         self.training_operator.reset_optimizer_for_params(self.params)
         self._init_grad_buffer()
 
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        self.training_operator.load_states(
+            states=states,
+            checkpoint=checkpoint,
+            keys=tuple(self.params.keys()))
+
+        # # Update the params in actor aspect.
+        latest_params = self.training_operator.get_named_parameters(cpu=False)
+
+        assert self.params.keys() == latest_params.keys()
+
+        for key in latest_params.keys():
+            self.params[key] = latest_params[key]
+
     def apply_updates(self, grad_buffer):
-        # TODO(HUI): gradient divide by num_worker
         self.training_operator.apply_updates(grad_buffer)
         self.params = self.training_operator.get_named_parameters(cpu=False)
 
@@ -570,6 +602,12 @@ class Worker(object):
         # when derive_updates.
         return self.training_operator.get_gradients()
 
+    def get_states(self):
+        return self.training_operator.get_states()
+
+    def save_states(self, checkpoint: str):
+        self.training_operator.save_states(checkpoint)
+
     def set_assignments(self, assignments):
         self.assignments = assignments
         keys = list(self.get_named_parameters(cpu=False).keys())
@@ -741,6 +779,21 @@ class DataParallelGroup(BaseDataParallelGroup):
     @property
     def actors(self):
         return self._distributed_actors
+
+    def get_states(self):
+        ret = self.actors[0].get_states.remote()
+        return ray.get([ret])[0]
+
+    def save_states(self, checkpoint: str):
+        rets = [self.actors[0].save_states.remote(checkpoint)]
+        ray.get(rets)
+
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        rets = [
+            actor.load_states.remote(states=states, checkpoint=checkpoint)
+            for _, actor in enumerate(self.actors)
+        ]
+        ray.get(rets)
 
     def save_parameters(self, checkpoint: str):
         rets = [self.actors[0].save_parameters.remote(checkpoint)]

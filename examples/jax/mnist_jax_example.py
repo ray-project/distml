@@ -18,6 +18,7 @@ from jax_util.datasets import mnist, Dataloader
 
 import numpy as np
 
+
 def initialization_hook(operator):
     # Need this for avoiding a connection restart issue on AWS.
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
