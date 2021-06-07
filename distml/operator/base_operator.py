@@ -1,6 +1,7 @@
 """Abstract class for framework-specific training operators."""
 from abc import ABCMeta
 from abc import abstractmethod
+from typing import Optional
 
 
 class TrainingOperator(metaclass=ABCMeta):
@@ -90,7 +91,7 @@ class TrainingOperator(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def save_states(self, checkpoint):
+    def save_states(self, checkpoint: str):
         """Save the states to a file path.
 
          This function shall be instantiated in framework-specific operator
@@ -104,7 +105,10 @@ class TrainingOperator(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def load_states(self, checkpoint):
+    def load_states(self,
+                    states=None,
+                    checkpoint: Optional[str] = None,
+                    keys: Optional[bool] = None):
         """Load the states from a file path.
 
         This functions shall be instantiated in framework-specific operators

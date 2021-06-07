@@ -8,7 +8,6 @@ from ray.util.sgd.utils import AverageMeterCollection
 import numpy as np
 
 from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
-from distml.util import ThroughputCollection
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -51,13 +50,9 @@ class AllReduceStrategy(BaseStrategy):
                      num_gpus_per_worker=num_gpus_per_worker,
                      **kwargs)
         self._global_batch_size = None
+
         if operator_config and operator_config.get("batch_size"):
             self._global_batch_size = operator_config.get("batch_size")
-        if self._global_batch_size:
-            self._collector = ThroughputCollection(
-                batch_size=self._global_batch_size)
-        else:
-            self._collector = ThroughputCollection()
 
         self._init_strategy()
 
@@ -69,8 +64,10 @@ class AllReduceStrategy(BaseStrategy):
                 function will simply train for one epoch.
 
         Returns:
-            None
+            metric (dict): metric of the training set.
         """
+        # TODO(HUI): metric use hook to control.
+
         # TODO (Hao): add fault tolerance using `max_retries`.
         steps = num_steps if num_steps \
             else self.data_parallel_group.get_data_loader_len()
@@ -78,8 +75,7 @@ class AllReduceStrategy(BaseStrategy):
         # TODO(Hao): this call should be hidden inside Replica.
         self.data_parallel_group.make_iterator()
         for idx in range(steps):
-            with self._collector.record("train"):
-                metric = self.data_parallel_group.train_batch()
+            metric = self.data_parallel_group.train_batch()
             print("Step: {}/{}".format(idx, steps))
         return metric
 
@@ -90,9 +86,13 @@ class AllReduceStrategy(BaseStrategy):
             num_steps (int): number of batches to evaluate. If None, the
                 function will simply validate across the entire validation
                 dataset.
+
+        Returns:
+            metric (dict): metric of the validate set.
         """
         steps = num_steps if num_steps \
             else self.data_parallel_group.get_data_loader_len(training=False)
+
         metrics = [
             AverageMeterCollection()
             for _ in range(len(self.data_parallel_group.replicas))
@@ -100,14 +100,12 @@ class AllReduceStrategy(BaseStrategy):
 
         self.data_parallel_group.make_iterator(training=False)
         for idx in range(steps):
-            with self._collector.record("validate"):
-                batch_metrics = self.data_parallel_group.validate_batch()
+            batch_metrics = self.data_parallel_group.validate_batch()
+
             for metric_idx, metric in enumerate(batch_metrics):
                 num_sample = metric.pop("num_sample")
                 metrics[metric_idx].update(metric, n=num_sample)
-        self._collector.update(
-            "validate", val_acc=batch_metrics[0]["val_loss"])
-        self._collector.save("validate")
+
         # TODO: validate result should be the same in all workers
         return metrics[0].summary()
 
@@ -150,12 +148,6 @@ class AllReduceStrategy(BaseStrategy):
 
     def shutdown(self, force: bool = False):
         self.data_parallel_group.shutdown(force=force)
-
-    def save_parameters(self, checkpoint: str):
-        self.data_parallel_group.save_parameters(checkpoint)
-
-    def load_parameters(self, checkpoint: str):
-        self.data_parallel_group.load_parameters(checkpoint)
 
     def get_states(self):
         return self.data_parallel_group.get_states()
@@ -287,15 +279,9 @@ class Replica:
     def set_parameters(self, params):
         self.training_operator.set_parameters(params)
 
-    def save_parameters(self, checkpoint: str):
-        self.training_operator.save_parameters(checkpoint)
-
-    def load_parameters(self, checkpoint: str):
-        self.training_operator.load_parameters(checkpoint)
-
     def apply(self, fn: Callable):
         """Apply a function in the replica process."""
-        return fn(self)
+        return fn()
 
     @property
     def train_loader(self):
@@ -424,17 +410,6 @@ class DataParallelGroup(BaseDataParallelGroup):
         rets = [
             replica.load_states.remote(states, checkpoint)
             for replica in self.replicas
-        ]
-        ray.get(rets)
-
-    def save_parameters(self, checkpoint: str):
-        rets = [self.replicas[0].save_parameters.remote(checkpoint)]
-        ray.get(rets)
-
-    def load_parameters(self, checkpoint: str):
-        rets = [
-            replica.load_parameters.remote(checkpoint)
-            for _, replica in enumerate(self.replicas)
         ]
         ray.get(rets)
 

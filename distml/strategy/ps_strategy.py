@@ -9,7 +9,6 @@ import numpy as np
 
 import distml.util as util
 from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
-from distml.util import ThroughputCollection
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +72,6 @@ class ParameterServerStrategy(BaseStrategy):
 
         if operator_config and operator_config.get("batch_size"):
             self._global_batch_size = operator_config.get("batch_size")
-        if self._global_batch_size:
-            self._collector = ThroughputCollection(
-                batch_size=self._global_batch_size)
-        else:
-            self._collector = ThroughputCollection()
 
     def _init_strategy(self):
         """Do initialization for the distributed strategy."""
@@ -195,14 +189,6 @@ class ParameterServerStrategy(BaseStrategy):
     def load_states(self, states=None, checkpoint: Optional[str] = None):
         self.server_group.load_states(states=states, checkpoint=checkpoint)
 
-    def save_parameters(self, checkpoint: str):
-        # TODO(HUI): ps save parameters.
-        self.worker_group.save_parameters(checkpoint)
-
-    def load_parameters(self, checkpoint: str):
-        # TODO(HUI): ps load parameters.
-        self.server_group.load_parameters(checkpoint)
-
     def _round_robin_sharding(self):
         """Generate the assignment of variable to servers."""
         parameter_distribution = ray.get(
@@ -224,7 +210,7 @@ class ParameterServerStrategy(BaseStrategy):
                 function will simply train for one epoch.
 
         Returns:
-            metrics (dict)
+            metrics (dict): metrics of training result.
         """
         # TODO (Hao): add fault tolerance using `max_retries`.
         steps = num_steps if num_steps \
@@ -235,8 +221,7 @@ class ParameterServerStrategy(BaseStrategy):
         # train one epoch
         self.worker_group.make_iterator()
         for idx in range(steps):
-            with self._collector.record("train"):
-                metrics = self.train_batch()
+            metrics = self.train_batch()
             print("Step: {}/{}".format(idx, steps))
         return metrics
 
@@ -336,7 +321,7 @@ class PS(object):
 
     def apply(self, fn: Callable):
         """Apply a function in the replica process."""
-        return fn(self)
+        return fn()
 
     def test_connection(self):
         for i in range(self.num_worker):
@@ -474,7 +459,7 @@ class Worker(object):
 
     def apply(self, fn: Callable):
         """Apply a function in the replica process."""
-        return fn(self)
+        return fn()
 
     def test_connection(self):
         for i in range(self.num_ps):
@@ -795,17 +780,6 @@ class DataParallelGroup(BaseDataParallelGroup):
         ]
         ray.get(rets)
 
-    def save_parameters(self, checkpoint: str):
-        rets = [self.actors[0].save_parameters.remote(checkpoint)]
-        ray.get(rets)
-
-    def load_parameters(self, checkpoint: str):
-        rets = [
-            actor.load_parameters.remote(checkpoint)
-            for _, actor in enumerate(self.actors)
-        ]
-        ray.get(rets)
-
     def set_parameters(self, params):
         rets = [
             actor.set_parameters.remote(params)
@@ -818,7 +792,6 @@ class DataParallelGroup(BaseDataParallelGroup):
         return ray.get([ret])[0]
 
     def get_named_parameters(self, cpu: bool = False):
-        # self.actors[0].recv_params()
         ret = self.actors[0].get_named_parameters.remote(cpu)
         return ray.get([ret])[0]
 

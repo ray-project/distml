@@ -16,7 +16,7 @@ from distml.operator.torch_operator import TorchTrainingOperator
 __all__ = ["make_torch_ar_strategy", "make_torch_ps_strategy", "ToyOperator"]
 
 
-def initialization_hook(self):
+def initialization_hook():
     # Need this for avoiding a connection restart issue on AWS.
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"

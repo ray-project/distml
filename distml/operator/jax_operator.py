@@ -405,15 +405,6 @@ class JAXTrainingOperator(TrainingOperator):
             del self._validation_loader
             self._validation_loader = None
 
-    # TODO(HUI): use pickle to serialize parameters or states and save it.
-    def save_parameters(self, checkpoint: str):
-        raise NotImplementedError(
-            "save_parameters is not support in jax operator.")
-
-    def load_parameters(self, checkpoint: str):
-        raise NotImplementedError(
-            "load_parameters is not support in jax operator.")
-
     def register_custom_states(self, custom_states):
         self._custom_states = custom_states
 
@@ -453,7 +444,7 @@ class JAXTrainingOperator(TrainingOperator):
     def load_states(self,
                     states=None,
                     checkpoint: Optional[str] = None,
-                    keys: Optional = None):
+                    keys: Optional[bool] = None):
         if checkpoint:
             assert ".pkl" in checkpoint, \
                 "checkpoint should be a .pkl file. Got {}".format(checkpoint)

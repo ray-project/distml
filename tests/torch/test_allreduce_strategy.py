@@ -84,9 +84,9 @@ class Test_allreduce_strategy_single_node_2workers:
 
     def _assert_allclose(self, p, q):
         if isinstance(p, torch.Tensor):
-            p = p.cpu().numpy()
+            p = p.detach().cpu().numpy()
         if isinstance(q, torch.Tensor):
-            q = q.cpu().numpy()
+            q = q.detach().cpu().numpy()
 
         self._assert_shape(p, q)
         assert np.allclose(p, q)
