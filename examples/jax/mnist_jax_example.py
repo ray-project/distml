@@ -16,6 +16,7 @@ import jax.numpy as jnp
 from jax_util.resnet import ResNet18, ResNet50, ResNet101
 from jax_util.datasets import mnist, Dataloader
 
+import numpy as np
 
 def initialization_hook():
     # Need this for avoiding a connection restart issue on AWS.
@@ -54,6 +55,12 @@ class MnistTrainingOperator(JAXTrainingOperator):
 
         with FileLock(".ray.lock"):
             train_images, train_labels, test_images, test_labels = mnist()
+
+        if config.get("test_mode", False):
+            train_images = np.random.choice(train_images, 1000)
+            train_labels = np.random.choice(train_labels, 1000)
+            test_images = np.random.choice(test_images, 1000)
+            test_labels = np.random.choice(test_labels, 1000)
 
         train_images = train_images.reshape(train_images.shape[0], 1, 28,
                                             28).transpose(2, 3, 1, 0)

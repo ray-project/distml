@@ -1,4 +1,8 @@
-from typing import Any, Mapping, Optional
+import os
+import pickle
+import warnings
+
+from typing import Any, Mapping, Optional, List, Dict
 
 import numpy as np
 import cupy as cp
@@ -16,7 +20,7 @@ from distml.operator.base_operator import TrainingOperator
 
 
 class JAXTrainingOperator(TrainingOperator):
-    def __init__(self, operator_config: Optional[Mapping[str, Any]]):
+    def __init__(self, *, operator_config: Optional[Mapping[str, Any]]):
         super(JAXTrainingOperator, self).__init__(operator_config)
         # Should be set by users in the `register` function.
         # model methods
@@ -29,10 +33,13 @@ class JAXTrainingOperator(TrainingOperator):
         self.get_params = None
 
         self.criterion = None
+        self.lr_scheduler = None
 
         # Data loaders for training and validation, registered by users.
         self._train_loader = None
         self._validation_loader = None
+
+        self._custom_states = None
 
         self.setup(operator_config)
 
@@ -267,15 +274,15 @@ class JAXTrainingOperator(TrainingOperator):
         targets_class = jnp.argmax(targets, axis=1)
 
         acc = jnp.mean(prediction_class == targets_class)
-        samples_num = targets.shape[0]
+        num_sample = targets.shape[0]
 
         return {
             "val_loss": loss.item(),
             "val_accuracy": acc.item(),
-            "samples_num": samples_num
+            "num_sample": num_sample
         }
 
-    def get_parameters(self, cpu: bool):
+    def get_parameters(self, cpu: bool) -> List:
         """get the flatten parameters."""
         params = self.get_params(self.opt_state)
         flatten_params, tree = tree_flatten(params)
@@ -284,9 +291,11 @@ class JAXTrainingOperator(TrainingOperator):
 
         if cpu:
             flatten_params = list(map(np.asarray, flatten_params))
+        else:
+            flatten_params = list(map(jnp.asarray, flatten_params))
         return flatten_params
 
-    def get_named_parameters(self, cpu: bool):
+    def get_named_parameters(self, cpu: bool) -> Dict:
         """Get the named parameters.
 
         In jax, we need to construct a dict to contain the parameters.
@@ -299,6 +308,7 @@ class JAXTrainingOperator(TrainingOperator):
             }
         else:
             dict_params = {f"{idx}": p for idx, p in enumerate(params)}
+
         return dict_params
 
     # TODO(HUI): used in load states or load parameters
@@ -311,6 +321,9 @@ class JAXTrainingOperator(TrainingOperator):
             new_params (dict): New parameters to updates the current model.
         """
         assert isinstance(new_params, dict)
+
+        # make sure all params in GPU. Should be controlled of use_gpu.
+        new_params = {k: jax.device_put(v) for k, v in new_params.items()}
 
         keys, new_params = unzip2(
             sorted(new_params.items(), key=lambda d: int(d[0])))
@@ -349,6 +362,8 @@ class JAXTrainingOperator(TrainingOperator):
                                "Got {}".format(type(params)))
 
         keys, params = unzip2(sorted(params.items(), key=lambda d: int(d[0])))
+
+        self.preset_keys = keys  # The keys to index the params.
         self.tree = tree_structure(params)
         self.opt_state = self.opt_init(params)
 
@@ -383,25 +398,117 @@ class JAXTrainingOperator(TrainingOperator):
         return jnp.asarray(v)
 
     def clean_redundancy(self):
-        del self._train_loader
-        del self._validation_loader
+        if self._train_loader:
+            del self._train_loader
+            self._train_loader = None
+        if self._validation_loader:
+            del self._validation_loader
+            self._validation_loader = None
 
-    # TODO(HUI): use pickle to serialize parameters or states and save it.
-    def save_parameters(self, checkpoint: str):
-        raise NotImplementedError(
-            "save_parameters is not support in jax operator.")
+    def register_custom_states(self, custom_states):
+        self._custom_states = custom_states
 
-    def load_parameters(self, checkpoint: str):
-        raise NotImplementedError(
-            "load_parameters is not support in jax operator.")
+    def get_custom_states(self):
+        return self._custom_states
+
+    def get_states(self) -> Dict:
+        """Return the states of this training operator."""
+
+        states_flat, tree, subtrees = self.opt_state
+
+        states_unflat = map(tree_unflatten, subtrees, states_flat)
+
+        states_unflat_dict = {
+            str(idx): value
+            for idx, value in enumerate(states_unflat)
+        }
+
+        states = {
+            "opt_state": states_unflat_dict,
+        }
+
+        if self._custom_states:
+            states.update({"custom": self.get_custom_states()})
+
+        if self.lr_scheduler and hasattr(self.lr_scheduler,
+                                         "get_state_dict()"):
+            states.update({"lr_scheduler": self.lr_scheduler.get_state_dict()})
+
+        return states
 
     def save_states(self, checkpoint: str):
-        raise NotImplementedError(
-            "save_states is not support in jax operator.")
+        states = self.get_states()
+        with open(checkpoint, "wb") as f:
+            pickle.dump(states, f)
 
-    def get_states(self):
-        raise NotImplementedError("get_states is not support in jax operator.")
+    def load_states(self,
+                    states=None,
+                    checkpoint: Optional[str] = None,
+                    keys: Optional[bool] = None):
+        if checkpoint:
+            assert ".pkl" in checkpoint, \
+                "checkpoint should be a .pkl file. Got {}".format(checkpoint)
+            if not os.path.exists(checkpoint):
+                raise RuntimeError("Checkpoint file doesn't exists.")
+            with open(checkpoint, "rb") as f:
+                states = pickle.load(f)
 
-    def load_states(self, checkpoint: str):
-        raise NotImplementedError(
-            "load_states is not support in jax operator.")
+        if states:
+            new_opt_states = states.get("opt_state", None)
+            custom_states = states.get("custom_states", None)
+            lr_scheduler_states = states.get("lr_scheduler", None)
+
+            if not new_opt_states:
+                raise RuntimeError("subtrees of new params is empty.")
+
+            assert isinstance(new_opt_states, dict)
+
+            if not keys:
+                keys = tuple([
+                    str(idx)
+                    for idx in range(len(self.get_parameters(cpu=False)))
+                ])
+            else:
+                # construct_opt_states_dict = OrderedDict()
+                construct_opt_states_dict = dict()
+                for key in keys:
+                    construct_opt_states_dict[key] = new_opt_states[key]
+                new_opt_states = construct_opt_states_dict
+
+            new_keys, new_opt_states = unzip2(
+                sorted(new_opt_states.items(), key=lambda d: int(d[0])))
+
+            keys = tuple(keys)
+            new_keys = tuple(new_keys)
+            assert keys == new_keys, \
+                "checkpoint key doesn't match the model params."
+
+            states_flat, tree, subtrees = self.opt_state
+            states_flat_2, subtrees_2 = unzip2(
+                map(tree_flatten, new_opt_states))
+
+            if not subtrees_2:
+                raise RuntimeError("subtrees of new params is empty.")
+            for idx, (subtree, subtree_2) in enumerate(
+                    zip(subtrees, subtrees_2)):
+                if subtree_2 != subtree:
+                    msg = ("input structure did not match the save params "
+                           "structure. input {} and output {}.")
+                    raise TypeError(msg.format(subtree, subtree_2))
+
+            self.opt_state = OptimizerState(states_flat_2, tree, subtrees_2)
+
+            if custom_states:
+                self._custom_states.update(custom_states)
+
+            if lr_scheduler_states:
+                if hasattr(self.lr_scheduler, "set_states_dict"):
+                    self.lr_scheduler.set_states_dict(lr_scheduler_states)
+                else:
+                    warnings.warn(
+                        "lr scheduler must have `set_states_dict` method"
+                        " to support loading lr scheduler states.")
+        else:
+            raise RuntimeError("This checkpoint is empty."
+                               "Got checkpoint {}, states {}".format(
+                                   checkpoint, states))

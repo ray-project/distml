@@ -1,12 +1,13 @@
 import logging
-from typing import Callable, Mapping, Any, Optional, Dict
+from typing import List, Callable, Mapping, Any, Optional, Dict
 
 import ray
 import ray.util.collective as col
-from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
-from distml.util import ThroughputCollection
+from ray.util.sgd.utils import AverageMeterCollection
 
 import numpy as np
+
+from distml.strategy.base_strategy import BaseStrategy, BaseDataParallelGroup
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -49,13 +50,11 @@ class AllReduceStrategy(BaseStrategy):
                      num_gpus_per_worker=num_gpus_per_worker,
                      **kwargs)
         self._global_batch_size = None
+
         if operator_config and operator_config.get("batch_size"):
             self._global_batch_size = operator_config.get("batch_size")
-        if self._global_batch_size:
-            self._collector = ThroughputCollection(
-                batch_size=self._global_batch_size)
-        else:
-            self._collector = ThroughputCollection()
+
+        self._init_strategy()
 
     def train(self, num_steps: Optional[int] = None) -> Dict:
         """Run the training on parallel workers.
@@ -65,8 +64,10 @@ class AllReduceStrategy(BaseStrategy):
                 function will simply train for one epoch.
 
         Returns:
-            None
+            metric (dict): metric of the training set.
         """
+        # TODO(HUI): metric use hook to control.
+
         # TODO (Hao): add fault tolerance using `max_retries`.
         steps = num_steps if num_steps \
             else self.data_parallel_group.get_data_loader_len()
@@ -74,10 +75,9 @@ class AllReduceStrategy(BaseStrategy):
         # TODO(Hao): this call should be hidden inside Replica.
         self.data_parallel_group.make_iterator()
         for idx in range(steps):
-            with self._collector.record("train"):
-                metrics = self.data_parallel_group.train_batch()
+            metric = self.data_parallel_group.train_batch()
             print("Step: {}/{}".format(idx, steps))
-        return metrics
+        return metric
 
     def validate(self, num_steps: Optional[int] = None) -> Dict:
         """Evaluates the model on the validation data.
@@ -86,18 +86,35 @@ class AllReduceStrategy(BaseStrategy):
             num_steps (int): number of batches to evaluate. If None, the
                 function will simply validate across the entire validation
                 dataset.
+
+        Returns:
+            metric (dict): metric of the validate set.
         """
         steps = num_steps if num_steps \
             else self.data_parallel_group.get_data_loader_len(training=False)
+
+        metrics = [
+            AverageMeterCollection()
+            for _ in range(len(self.data_parallel_group.replicas))
+        ]
+
         self.data_parallel_group.make_iterator(training=False)
         for idx in range(steps):
-            with self._collector.record("validate"):
-                batch_metrics = self.data_parallel_group.validate_batch()
-        self._collector.update(
-            "validate", val_acc=batch_metrics[0]["val_loss"])
-        self._collector.save("validate")
+            batch_metrics = self.data_parallel_group.validate_batch()
+
+            for metric_idx, metric in enumerate(batch_metrics):
+                num_sample = metric.pop("num_sample")
+                metrics[metric_idx].update(metric, n=num_sample)
+
         # TODO: validate result should be the same in all workers
-        return batch_metrics
+        return metrics[0].summary()
+
+    def _init_strategy(self):
+        """Do initialization for the distributed strategy."""
+        # All sync with replica 0
+        init_weights = self.data_parallel_group.get_named_parameters(cpu=True)
+        # all replicas get synced
+        self.data_parallel_group.set_parameters(init_weights)
 
     def _start_workers(self):
         """Create distributed workers on the Ray cluster for distributed training.
@@ -132,14 +149,14 @@ class AllReduceStrategy(BaseStrategy):
     def shutdown(self, force: bool = False):
         self.data_parallel_group.shutdown(force=force)
 
-    def save_parameters(self, checkpoint: str):
-        self.data_parallel_group.save_parameters(checkpoint)
+    def get_states(self):
+        return self.data_parallel_group.get_states()
 
-    def load_parameters(self, checkpoint: str):
-        self.data_parallel_group.load_parameters(checkpoint)
+    def save_states(self, checkpoint: str):
+        self.data_parallel_group.save_states(checkpoint)
 
-    def _init_strategy(self):
-        pass
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        self.data_parallel_group.load_states(states, checkpoint)
 
 
 class Replica:
@@ -205,7 +222,7 @@ class Replica:
         metrics = {}
         try:
             batch = next(self.train_iterator)
-        except StopIteration and NameError:
+        except StopIteration or NameError:
             self.make_iterator()
             batch = next(self.train_iterator)
         loss_val, updates = self.derive_updates(batch)
@@ -214,7 +231,7 @@ class Replica:
         metrics["train_loss"] = loss_val
         for _, g in updates.items():
             cg = self.training_operator.to_cupy(g)
-            col.allreduce(cg)
+            col.allreduce(cg, self.group_name)
             cg = cg / float(self.world_size)
         self.apply_updates(updates)
         return metrics
@@ -231,7 +248,7 @@ class Replica:
     def validate_batch(self):
         try:
             batch = next(self.validation_iterator)
-        except StopIteration and NameError:
+        except StopIteration or NameError:
             self.make_iterator(training=False)
             batch = next(self.validation_iterator)
         batch_metric = self.training_operator.validate_batch(batch)
@@ -244,11 +261,23 @@ class Replica:
             del self.training_operator
         return 1
 
-    def save_parameters(self, checkpoint: str):
-        self.training_operator.save_parameters(checkpoint)
+    def get_states(self):
+        return self.training_operator.get_states()
 
-    def load_parameters(self, checkpoint: str):
-        self.training_operator.load_parameters(checkpoint)
+    def save_states(self, checkpoint: str):
+        self.training_operator.save_states(checkpoint)
+
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
+        self.training_operator.load_states(states, checkpoint)
+
+    def get_parameters(self, cpu: bool) -> List:
+        return self.training_operator.get_parameters(cpu)
+
+    def get_named_parameters(self, cpu: bool) -> Dict:
+        return self.training_operator.get_named_parameters(cpu)
+
+    def set_parameters(self, params):
+        self.training_operator.set_parameters(params)
 
     def apply(self, fn: Callable):
         """Apply a function in the replica process."""
@@ -288,7 +317,6 @@ class DataParallelGroup(BaseDataParallelGroup):
             num_cpus_per_actor=num_cpus_per_actor,
             num_gpus_per_actor=num_gpus_per_actor,
             initialization_hook=initialization_hook)
-        self._replicas = None
 
     @property
     def _replica_params(self):
@@ -370,14 +398,18 @@ class DataParallelGroup(BaseDataParallelGroup):
     def reset(self):
         pass
 
-    def save_parameters(self, checkpoint: str):
-        rets = [self.replicas[0].save_parameters.remote(checkpoint)]
+    def get_states(self):
+        rets = [self.replicas[0].get_states.remote()]
+        return ray.get(rets)[0]
+
+    def save_states(self, checkpoint: str):
+        rets = [self.replicas[0].save_states.remote(checkpoint)]
         ray.get(rets)
 
-    def load_parameters(self, checkpoint: str):
+    def load_states(self, states=None, checkpoint: Optional[str] = None):
         rets = [
-            replica.load_parameters.remote(checkpoint)
-            for _, replica in enumerate(self.replicas)
+            replica.load_states.remote(states, checkpoint)
+            for replica in self.replicas
         ]
         ray.get(rets)
 

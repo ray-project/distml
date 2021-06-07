@@ -1,7 +1,7 @@
 from abc import ABCMeta
 from abc import abstractmethod
 import logging
-from typing import Callable, Any, Mapping, Optional
+from typing import Callable, Any, Mapping, Optional, Sequence
 
 import ray
 
@@ -52,7 +52,7 @@ class BaseStrategy(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def save_parameters(self, checkpoint: str):
+    def save_states(self, checkpoint: str):
         """Saves the Trainer state to the provided checkpoint path.
 
         Args:
@@ -61,11 +61,17 @@ class BaseStrategy(metaclass=ABCMeta):
         raise NotImplementedError()
 
     @abstractmethod
-    def load_parameters(self, checkpoint: str):
-        """Loads the Trainer state to the provided checkpoint path.
+    def load_states(self,
+                    states=None,
+                    checkpoint: Optional[str] = None,
+                    keys: Optional[Sequence[str]] = None):
+        """Saves the Trainer state to the provided checkpoint path.
 
         Args:
+            states: States to load.
             checkpoint (str): Path to target checkpoint file.
+            keys (str): Keys of the params to load.
+                        If None, using all states.
         """
         raise NotImplementedError()
 
@@ -157,13 +163,27 @@ class BaseDataParallelGroup:
         raise NotImplementedError()
 
     @abstractmethod
-    def save_parameters(self, checkpoint: str):
-        """Let the first actor save parameters."""
+    def save_states(self, checkpoint: str):
+        """Saves the Trainer state to the provided checkpoint path.
+
+        Args:
+            checkpoint (str): Path to target checkpoint file.
+        """
         raise NotImplementedError()
 
     @abstractmethod
-    def load_parameters(self, checkpoint: str):
-        """All actor load parameters from checkpoint."""
+    def load_states(self,
+                    states=None,
+                    checkpoint: Optional[str] = None,
+                    keys: Optional[Sequence[str]] = None):
+        """Saves the Trainer state to the provided checkpoint path.
+
+        Args:
+            states: States to load.
+            checkpoint (str): Path to target checkpoint file.
+            keys (str): Keys of the params to load.
+                        If None, using all states.
+        """
         raise NotImplementedError()
 
     @abstractmethod
