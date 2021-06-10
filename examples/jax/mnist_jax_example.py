@@ -100,6 +100,8 @@ def make_ar_strategy(args):
 
 
 def make_ps_strategy(args):
+    assert args.num_worker - args.num_ps > 0,\
+        "`num_worker` should be larger than `num_ps`"
     strategy = ParameterServerStrategy(
         training_operator_cls=MnistTrainingOperator,
         world_size=args.num_worker,
