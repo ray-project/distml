@@ -23,6 +23,7 @@ def initialization_hook():
     os.environ["NCCL_SOCKET_IFNAME"] = "^docker0,lo"
     os.environ["NCCL_LL_THRESHOLD"] = "0"
     os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "False"
+    os.environ["NCCL_SHM_DISABLE"] = "1"
 
     # set the below if needed
     # print("NCCL DEBUG SET")
