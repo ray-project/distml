@@ -103,7 +103,7 @@ class JAXTrainingOperator(TrainingOperator):
                 "'opt_init', 'opt_update' and 'get_params'."
                 "Got: {} {}".format(type(optimizer), len(optimizer)))
 
-        if not hasattr(criterion, "__call__"):
+        if not callable(criterion):
             raise RuntimeError(
                 "The `criterion` must be callable function that "
                 "feed logits and target, return the loss value. "
@@ -123,12 +123,12 @@ class JAXTrainingOperator(TrainingOperator):
                 "`opt_states` return from optimizer `opt_init`. "
                 "Got: {}".format(type(model[0])))
 
-        if not hasattr(model[1], "__call__"):
+        if not callable(model[1]):
             raise RuntimeError("The second elemente of `model` must be the "
                                "`init_fun` return from model. "
                                "Got: {}".format(type(model[1])))
 
-        if not hasattr(model[2], "__call__"):
+        if not callable(model[2]):
             raise RuntimeError("The third elemente of `model` must be the "
                                "`predict_fun` return from model. "
                                "Got: {}".format(type(model[2])))
@@ -139,18 +139,18 @@ class JAXTrainingOperator(TrainingOperator):
 
     def _register_optimizer(self, optimizer):
         """register optimizer components."""
-        if not hasattr(optimizer[0], "__call__"):
+        if not callable(optimizer[0]):
             raise RuntimeError("The fist elemente of `optimizer` must be the "
                                "`opt_init` return from optimizer. "
                                "Got: {}".format(type(optimizer[1])))
 
-        if not hasattr(optimizer[1], "__call__"):
+        if not callable(optimizer[1]):
             raise RuntimeError(
                 "The second elemente of `optimizer` must be the "
                 "`opt_update` return from optimizer. "
                 "Got: {}".format(type(optimizer[1])))
 
-        if not hasattr(optimizer[2], "__call__"):
+        if not callable(optimizer[2]):
             raise RuntimeError("The third elemente of `optimizer` must be the "
                                "`get_params` return from optimizer. "
                                "Got: {}".format(type(optimizer[2])))
