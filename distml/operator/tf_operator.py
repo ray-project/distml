@@ -1,5 +1,6 @@
 import logging
 from distml.operator.base_operator import TrainingOperator
+import cupy as cp
 
 try:
     import tensorflow as tf
@@ -207,4 +208,5 @@ class TFTrainingOperator(TrainingOperator):
         if not isinstance(tf_tensor, tf.Tensor):
             raise RuntimeError("Expected tf.Tensor, but got: {}. "
                                .format(tf_tensor))
-            return tf_tensor.numpy()
+            dfcapsule = tf.experimental.dlpack.to_dlpack(tf_tensor)
+            return cp.fromDlpack(dfcapsule)
