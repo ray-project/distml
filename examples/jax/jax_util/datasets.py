@@ -128,6 +128,7 @@ def cifa100_raw():
             datadict = pickle.load(f, encoding="bytes")
             X = datadict[b"data"]
             Y = datadict[b"fine_labels"]
+
             if mode == "train":
                 X = X.reshape(50000, 3, 32, 32)
             else:
