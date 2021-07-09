@@ -311,7 +311,6 @@ class JAXTrainingOperator(TrainingOperator):
 
         return dict_params
 
-    # TODO(HUI): used in load states or load parameters
     def set_parameters(self, new_params):
         """Use new parameters to replace model parameters.
 

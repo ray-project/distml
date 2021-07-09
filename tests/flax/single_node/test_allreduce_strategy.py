@@ -4,19 +4,18 @@ import jax.numpy as jnp
 import ray
 from ray.util.sgd.utils import AverageMeterCollection
 
-from tests.jax_util import make_jax_ps_strategy
+from tests.flax_util import make_flax_ar_strategy
+
+import flax.traverse_util as traverse_util
 
 
-class Test_ps_strategy_single_node_2workers_2server:
-    num_worker = 2
-    num_ps = 2
+class Test_allreduce_strategy_single_node_2workers:
+    world_size = 2
 
     def setup_class(self):
-        num_worker = self.num_worker
-        num_ps = self.num_ps
-        world_size = num_worker + num_ps
-        ray.init(num_gpus=world_size, num_cpus=world_size * 3)
-        self.strategy = make_jax_ps_strategy(num_ps, num_worker)
+        world_size = self.world_size
+        ray.init(num_gpus=world_size, num_cpus=world_size * 2)
+        self.strategy = make_flax_ar_strategy(world_size)
 
     def teardown_class(self):
         del self.strategy
@@ -29,8 +28,8 @@ class Test_ps_strategy_single_node_2workers_2server:
         strategy = self.strategy
 
         rets = [
-            actor.get_named_parameters.remote(cpu=True)
-            for actor in strategy.worker_group.actors
+            replica.get_named_parameters.remote(cpu=True)
+            for replica in strategy.data_parallel_group.replicas
         ]
 
         params = ray.get(rets)
@@ -50,21 +49,22 @@ class Test_ps_strategy_single_node_2workers_2server:
         self.strategy.validate()
 
     def test_validate_result(self):
-        """Make sure all workers validate results are the same.
+        """Make sure all replicas validate results are the same.
 
         But it cant be test after using distributed sampler.
         """
         strategy = self.strategy
 
-        steps = strategy.worker_group.get_data_loader_len(training=False)
+        steps = strategy.data_parallel_group.get_data_loader_len(
+            training=False)
         metrics = [
             AverageMeterCollection()
-            for _ in range(len(strategy.worker_group.actors))
+            for _ in range(len(strategy.data_parallel_group.replicas))
         ]
 
-        strategy.worker_group.make_iterator(training=False)
+        strategy.data_parallel_group.make_iterator(training=False)
         for idx in range(steps):
-            batch_metrics = strategy.worker_group.validate_batch()
+            batch_metrics = strategy.data_parallel_group.validate_batch()
             for metric_idx, metric in enumerate(batch_metrics):
                 num_sample = metric.pop("num_sample")
                 metrics[metric_idx].update(metric, n=num_sample)
@@ -77,33 +77,33 @@ class Test_ps_strategy_single_node_2workers_2server:
                        metrics[i + 1]._meters[key].avg < 1e-4
 
     def test_states(self):
-        def _assert_states(opt_state1, opt_state2):
-            assert opt_state1.keys() == opt_state2.keys()
+        def _assert_states(state_dict1, state_dict2):
+            state_dict1 = traverse_util.flatten_dict(state_dict1["target"])
+            state_dict2 = traverse_util.flatten_dict(state_dict2["target"])
+            assert state_dict1.keys() == state_dict2.keys()
 
-            for key in opt_state1.keys():
-                for idx in range(len(opt_state1[key])):
-                    self._assert_allclose(opt_state1[key][idx],
-                                          opt_state2[key][idx])
+            for key in state_dict1.keys():
+                for idx in range(len(state_dict1[key])):
+                    self._assert_allclose(state_dict1[key][idx],
+                                          state_dict2[key][idx])
 
         strategy = self.strategy
-        checkpoint = "test_ps_strategy_states.pkl"
+        checkpoint = "tmp_states.pkl"
 
-        strategy.train(1)
         states1 = strategy.get_states()
-
         strategy.save_states(checkpoint=checkpoint)
 
         strategy.train(1)  # make states different.
         strategy.load_states(checkpoint=checkpoint)
         states2 = strategy.get_states()
 
-        _assert_states(states1["opt_state"], states2["opt_state"])
+        _assert_states(states1["state_dict"], states2["state_dict"])
 
         strategy.train(1)  # make states different.
         strategy.load_states(states=states1)
-        states3 = strategy.get_states()
+        states2 = strategy.get_states()
 
-        _assert_states(states1["opt_state"], states3["opt_state"])
+        _assert_states(states1["state_dict"], states2["state_dict"])
 
     def _assert_shape(self, p, q):
         shape1 = p.shape

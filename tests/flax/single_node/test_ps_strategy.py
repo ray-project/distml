@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import ray
 from ray.util.sgd.utils import AverageMeterCollection
 
-from tests.jax_util import make_jax_ps_strategy
+from tests.flax_util import make_flax_ps_strategy
 
 
 class Test_ps_strategy_single_node_2workers_2server:
@@ -16,7 +16,7 @@ class Test_ps_strategy_single_node_2workers_2server:
         num_ps = self.num_ps
         world_size = num_worker + num_ps
         ray.init(num_gpus=world_size, num_cpus=world_size * 3)
-        self.strategy = make_jax_ps_strategy(num_ps, num_worker)
+        self.strategy = make_flax_ps_strategy(num_ps, num_worker)
 
     def teardown_class(self):
         del self.strategy
@@ -77,13 +77,15 @@ class Test_ps_strategy_single_node_2workers_2server:
                        metrics[i + 1]._meters[key].avg < 1e-4
 
     def test_states(self):
-        def _assert_states(opt_state1, opt_state2):
-            assert opt_state1.keys() == opt_state2.keys()
+        def _assert_states(state_dict1, state_dict2):
+            state_dict1 = traverse_util.flatten_dict(state_dict1["target"])
+            state_dict2 = traverse_util.flatten_dict(state_dict2["target"])
+            assert state_dict1.keys() == state_dict2.keys()
 
-            for key in opt_state1.keys():
-                for idx in range(len(opt_state1[key])):
-                    self._assert_allclose(opt_state1[key][idx],
-                                          opt_state2[key][idx])
+            for key in state_dict1.keys():
+                for idx in range(len(state_dict1[key])):
+                    self._assert_allclose(state_dict1[key][idx],
+                                          state_dict2[key][idx])
 
         strategy = self.strategy
         checkpoint = "test_ps_strategy_states.pkl"
@@ -97,13 +99,13 @@ class Test_ps_strategy_single_node_2workers_2server:
         strategy.load_states(checkpoint=checkpoint)
         states2 = strategy.get_states()
 
-        _assert_states(states1["opt_state"], states2["opt_state"])
+        _assert_states(states1["state_dict"], states2["state_dict"])
 
         strategy.train(1)  # make states different.
         strategy.load_states(states=states1)
         states3 = strategy.get_states()
 
-        _assert_states(states1["opt_state"], states3["opt_state"])
+        _assert_states(states1["state_dict"], states2["state_dict"])
 
     def _assert_shape(self, p, q):
         shape1 = p.shape
