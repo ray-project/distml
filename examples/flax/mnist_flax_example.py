@@ -3,20 +3,28 @@ import argparse
 
 from filelock import FileLock
 
+from tqdm import trange
+
 import ray
-from distml.operator.jax_operator import JAXTrainingOperator
+from distml.operator.flax_operator import FLAXTrainingOperator
 from distml.strategy.allreduce_strategy import AllReduceStrategy
 from distml.strategy.ps_strategy import ParameterServerStrategy
-
-from ray.util.sgd.utils import override
-
-from jax import random
-from jax.experimental import optimizers
-import jax.numpy as jnp
-from jax_util.resnet import ResNet18, ResNet50, ResNet101
-from jax_util.datasets import mnist, Dataloader
+from ray.util.sgd.utils import BATCH_SIZE, override
 
 import numpy as np
+import numpy.random as npr
+
+import jax
+from jax import jit, grad, random
+from jax.tree_util import tree_flatten
+import jax.numpy as jnp
+
+import flax 
+import flax.optim as optim
+
+from flax_util.models import ToyModel
+from flax_util.datasets import Dataloader
+from examples.jax.jax_util.datasets import mnist
 
 
 def initialization_hook():
@@ -29,31 +37,22 @@ def initialization_hook():
     # print("NCCL DEBUG SET")
     # os.environ["NCCL_DEBUG"] = "INFO"
 
-
-class MnistTrainingOperator(JAXTrainingOperator):
-    @override(JAXTrainingOperator)
+       
+class MnistTrainingOperator(FLAXTrainingOperator):
+    @override(FLAXTrainingOperator)
     def setup(self, config):
+        key1, key2 = random.split(random.PRNGKey(0))
         batch_size = config["batch_size"]
-        rng_key = random.PRNGKey(0)
-        input_shape = (28, 28, 1, batch_size)
+        input_shape = (batch_size, 28, 28, 1)
         lr = config["lr"]
-        model_name = config["model_name"]
-        num_classes = config["num_classes"]
 
-        if model_name == "resnet18":
-            init_fun, predict_fun = ResNet18(num_classes)
-        elif model_name == "resnet50":
-            init_fun, predict_fun = ResNet50(num_classes)
-        elif model_name == "resnet101":
-            init_fun, predict_fun = ResNet101(num_classes)
-        else:
-            raise RuntimeError("Unrecognized model name")
+        model = ToyModel(num_classes=10)
+        x = random.normal(key1, input_shape)
+        params = model.init(key2, x)
 
-        _, init_params = init_fun(rng_key, input_shape)
-
-        opt_init, opt_update, get_params = optimizers.adam(lr)
-        opt_state = opt_init(init_params)
-
+        optimizer_def = optim.Adam(learning_rate=lr) # Choose the method
+        optimizer = optimizer_def.create(params) # Create the wrapping optimizer with initial parameters
+        
         with FileLock(".ray.lock"):
             train_images, train_labels, test_images, test_labels = mnist()
 
@@ -65,26 +64,15 @@ class MnistTrainingOperator(JAXTrainingOperator):
             test_images = test_images[rng, ...]
             test_labels = test_labels[rng, ...]
 
-        train_images = train_images.reshape(train_images.shape[0], 1, 28,
-                                            28).transpose(2, 3, 1, 0)
-        test_images = test_images.reshape(test_images.shape[0], 1, 28,
-                                          28).transpose(2, 3, 1, 0)
+        train_images = train_images.reshape(train_images.shape[0], 1, 28, 28).transpose(0, 2, 3, 1)
+        test_images = test_images.reshape(test_images.shape[0], 1, 28, 28).transpose(0, 2, 3, 1)
 
-        train_loader = Dataloader(
-            train_images, train_labels, batch_size=batch_size, shuffle=True)
-        test_loader = Dataloader(
-            test_images, test_labels, batch_size=batch_size)
-
-        def criterion(logits, targets):
-            return -jnp.sum(logits * targets)
-
-        self.register(
-            model=[opt_state, init_fun, predict_fun],
-            optimizer=[opt_init, opt_update, get_params],
-            criterion=criterion)
-
-        self.register_data(
-            train_loader=train_loader, validation_loader=test_loader)
+        train_loader = Dataloader(train_images, train_labels, batch_size=batch_size, shuffle=True)
+        test_loader = Dataloader(test_images, test_labels, batch_size=batch_size)
+        
+        self.register(model=model, optimizer=optimizer, criterion=lambda logits, targets:-jnp.sum(logits * targets))
+    
+        self.register_data(train_loader=train_loader, validation_loader=test_loader)
 
 
 def make_ar_strategy(args):
@@ -93,10 +81,10 @@ def make_ar_strategy(args):
         world_size=args.num_worker,
         operator_config={
             "lr": 0.01,
+            "test_mode": args.smoke_test,  # subset the data
+                # this will be split across workers.
             "batch_size": 128,
-            "num_worker": args.num_worker,
             "num_classes": 10,
-            "model_name": args.model_name
         },
         initialization_hook=initialization_hook)
 
@@ -111,9 +99,10 @@ def make_ps_strategy(args):
         num_ps=args.num_ps,
         operator_config={
             "lr": 0.01,
+            "test_mode": args.smoke_test,  # subset the data
+                # this will be split across workers.
             "batch_size": 128,
             "num_classes": 10,
-            "model_name": args.model_name
         },
         initialization_hook=initialization_hook)
 
@@ -144,27 +133,29 @@ if __name__ == "__main__":
         default=20,
         help="Number of epochs to train.")
     parser.add_argument(
+        "--use-gpu",
+        action="store_true",
+        default=False,
+        help="Enables GPU training")
+    parser.add_argument(
         "--fp16",
         action="store_true",
         default=False,
         help="Enables FP16 training with apex. Requires `use-gpu`.")
     parser.add_argument(
-        "--model-name",
-        type=str,
-        default="resnet18",
-        help="model, Optional: resnet18, resnet50, resnet101.")
+        "--smoke-test",
+        action="store_true",
+        default=False,
+        help="Finish quickly for testing.")
     parser.add_argument(
-        "--strategy", type=str, default="ar", help="model, Optional: ar, ps.")
+        "--tune", action="store_true", default=False, help="Tune training")
+    parser.add_argument(
+        "--strategy", type=str, default="ar", help="strategy type, Optional: ar, ps")
+
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,6,7"
 
     args, _ = parser.parse_known_args()
-
-    if args.address:
-        ray.init(args.address)
-    else:
-        ray.init(
-            num_gpus=args.num_worker,
-            num_cpus=args.num_worker * 2,
-            log_to_driver=True)
+    ray.init(num_gpus=args.num_worker, num_cpus=args.num_worker, log_to_driver=True)
 
     if args.strategy == "ar":
         strategy = make_ar_strategy(args)
@@ -179,3 +170,4 @@ if __name__ == "__main__":
     print(strategy.validate())
     strategy.shutdown()
     print("success!")
+
