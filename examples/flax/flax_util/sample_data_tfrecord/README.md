@@ -1,0 +1,1 @@
+Dowload a shard of wiki dataset for bert pretraining from this link: https://drive.google.com/file/d/1USmhLS52uKortaLVpO63uqJwpG7FRsgS/view?usp=sharing
