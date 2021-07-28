@@ -3,7 +3,7 @@ import logging
 from distml.operator.base_operator import TrainingOperator
 
 try:
-    import thinc
+    import thinc.api
 except ImportError:
     raise ImportError("Please install Thinc following: "
                       "https://thinc.ai/docs/install")
@@ -25,6 +25,8 @@ class ThincTrainingOperator(TrainingOperator):
         self._loss_calculator = None
 
         self._use_gpu = None
+        
+        # TODO(Dacheng): Implement learning rate scheduler
         self.setup(operator_config)
     
     def setup(self, *args, **kwargs):
@@ -33,7 +35,7 @@ class ThincTrainingOperator(TrainingOperator):
                                   "your model, optimizer, and criterion.")
 
 
-    def register(self, *, model, optimmizer, loss=None, use_gpu=True, **kwargs):
+    def register(self, *, model, optimizer, loss=None, use_gpu=True, **kwargs):
         if not isinstance(model, thinc.api.Model):
             raise RuntimeError("`model` must be thinc.api.Models. "
                                "Got: {}".format(model))
@@ -46,10 +48,10 @@ class ThincTrainingOperator(TrainingOperator):
         except:
             raise RuntimeError("ray.util.distml now only supports GPU training.")
         
-        if not isinstance(optimmizer, thinc.api.Optimizer):
+        if not isinstance(optimizer, thinc.api.Optimizer):
             raise RuntimeError("`optimizer` must be thinc.api.Optimmizer. "
                                "Got: {}".format(optimizer))
-        self._optimizer = optimmizer
+        self._optimizer = optimizer
         if loss:
             if not isinstance(loss, thinc.api.Loss):
                 raise RuntimeError("`loss` must be thinc.api.Loss. "
@@ -141,3 +143,27 @@ class ThincTrainingOperator(TrainingOperator):
         """Set the model gradients as grads."""
         for name, p in model.param_names:
             model.set_grad(name, grads[name])
+  
+    def get_states(self):
+        """Return the states of this training operator."""
+        states = {
+            "model": self._model.to_dict(),
+            #"optimizer": self._optimizer.state_dict(),
+            "custom": self.get_custom_states()
+        }
+        return states
+
+    def load_states(self, states=None):
+        """Load the states into the operator."""
+        self.model.from_dict(states["model"])
+        # TODO(Dacheng): Figure out how to deserialize optimizer
+        #self.optimizer.load_state_dict(states["optimizer"])
+        #if self._lr_scheduler:
+        #    self._lr_scheduler.load_state_dict(states["lr_scheduler"])
+        self.load_custom_states(states["custom"])
+
+    def save_states(self, checkpoint):
+        """Save the states to a file path."""
+        states = self.get_states()
+        raise NotImplementedError()
+        # torch.save(states, checkpoint)
